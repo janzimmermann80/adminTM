@@ -167,43 +167,96 @@ export const TabInfo = ({ company, onReload }: Props) => {
 
           {editBasic ? (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {([
-                  ['company', 'Název firmy'],
-                  ['street', 'Ulice'],
-                  ['city', 'Město'],
-                  ['zip', 'PSČ'],
-                  ['country', 'Stát'],
-                  ['cin', 'IČO'],
-                  ['tin', 'DIČ'],
-                  ['bank', 'Banka'],
-                  ['account', 'Číslo účtu'],
-                  ['branch', 'Pobočka'],
-                  ['region', 'Oblast'],
-                ] as [keyof typeof basic, string][]).map(([k, l]) => (
-                  <div key={k}>
-                    <label className={labelCls}>{l}</label>
-                    <input className={inputCls} value={basic[k]} onChange={e => setBasic(p => ({ ...p, [k]: e.target.value }))} />
+              <div className="space-y-2">
+                {/* Název */}
+                <div>
+                  <label className={labelCls}>Název firmy</label>
+                  <input className={inputCls} value={basic.company} onChange={e => setBasic(p => ({ ...p, company: e.target.value }))} />
+                </div>
+                {/* Ulice */}
+                <div>
+                  <label className={labelCls}>Ulice</label>
+                  <input className={inputCls} value={basic.street} onChange={e => setBasic(p => ({ ...p, street: e.target.value }))} />
+                </div>
+                {/* PSČ + Město + Stát + Oblast */}
+                <div className="flex gap-2">
+                  <div className="w-20 shrink-0">
+                    <label className={labelCls}>PSČ</label>
+                    <input className={inputCls} value={basic.zip} onChange={e => setBasic(p => ({ ...p, zip: e.target.value }))} />
                   </div>
-                ))}
+                  <div className="flex-1">
+                    <label className={labelCls}>Město</label>
+                    <input className={inputCls} value={basic.city} onChange={e => setBasic(p => ({ ...p, city: e.target.value }))} />
+                  </div>
+                  <div className="w-14 shrink-0">
+                    <label className={labelCls}>Stát</label>
+                    <input className={inputCls} value={basic.country} onChange={e => setBasic(p => ({ ...p, country: e.target.value }))} />
+                  </div>
+                  <div className="w-16 shrink-0">
+                    <label className={labelCls}>Oblast</label>
+                    <input className={inputCls} value={basic.region} onChange={e => setBasic(p => ({ ...p, region: e.target.value }))} />
+                  </div>
+                </div>
+                {/* IČO + DIČ */}
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <label className={labelCls}>IČO</label>
+                    <input className={inputCls} value={basic.cin} onChange={e => setBasic(p => ({ ...p, cin: e.target.value }))} />
+                  </div>
+                  <div className="flex-1">
+                    <label className={labelCls}>DIČ</label>
+                    <input className={inputCls} value={basic.tin} onChange={e => setBasic(p => ({ ...p, tin: e.target.value }))} />
+                  </div>
+                </div>
+                {/* Banka + Účet + Pobočka */}
+                <div className="flex gap-2">
+                  <div className="w-24 shrink-0">
+                    <label className={labelCls}>Banka</label>
+                    <input className={inputCls} value={basic.bank} onChange={e => setBasic(p => ({ ...p, bank: e.target.value }))} />
+                  </div>
+                  <div className="flex-1">
+                    <label className={labelCls}>Číslo účtu</label>
+                    <input className={inputCls} value={basic.account} onChange={e => setBasic(p => ({ ...p, account: e.target.value }))} />
+                  </div>
+                  <div className="w-24 shrink-0">
+                    <label className={labelCls}>Pobočka</label>
+                    <input className={inputCls} value={basic.branch} onChange={e => setBasic(p => ({ ...p, branch: e.target.value }))} />
+                  </div>
+                </div>
               </div>
               <SaveBar onSave={saveBasic} onCancel={() => setEditBasic(false)} saving={saving} />
             </>
           ) : (
-            <dl className="space-y-2">
-              <Row label="Název firmy" value={company.company} />
-              <Row label="IČO" value={company.cin} />
-              <Row label="DIČ" value={company.tin} />
-              <Row label="Ulice" value={company.street} />
-              <Row label="Město" value={company.city} />
-              <Row label="PSČ" value={company.zip} />
-              <Row label="Stát" value={company.country} />
-              <Row label="Oblast" value={company.region} />
-              <Row label="Banka" value={company.bank} />
-              <Row label="Číslo účtu" value={company.account} />
-              <Row label="Pobočka" value={company.branch} />
-              <Row label="Provider" value={company.provider} />
-            </dl>
+            <div className="space-y-1.5 text-sm">
+              {/* Název firmy */}
+              <p className="font-semibold text-gray-900 text-base">{company.company}</p>
+              {/* Ulice */}
+              {company.street && <p className="text-gray-700">{company.street}</p>}
+              {/* PSČ Město Stát Oblast */}
+              <p className="text-gray-700">
+                {[company.zip, company.city].filter(Boolean).join(' ')}
+                {company.country && <span className="ml-2 bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 text-xs font-mono">{company.country}</span>}
+                {company.region && <span className="ml-2 text-gray-400 text-xs">O: {company.region}</span>}
+              </p>
+              {/* IČO / DIČ */}
+              {(company.cin || company.tin) && (
+                <p className="text-gray-500">
+                  {company.cin && <span>IČO: <strong className="text-gray-800">{company.cin}</strong></span>}
+                  {company.cin && company.tin && <span className="mx-2 text-gray-300">|</span>}
+                  {company.tin && <span>DIČ: <strong className="text-gray-800">{company.tin}</strong></span>}
+                </p>
+              )}
+              {/* Banka / Účet */}
+              {(company.bank || company.account) && (
+                <p className="text-gray-500">
+                  {company.bank && <span>Banka: <strong className="text-gray-800">{company.bank}</strong></span>}
+                  {company.bank && company.account && <span className="mx-2 text-gray-300">|</span>}
+                  {company.account && <span>Účet: <strong className="text-gray-800">{company.account}</strong></span>}
+                  {company.branch && <span className="ml-2 text-gray-400 text-xs">({company.branch})</span>}
+                </p>
+              )}
+              {company.provider && <p className="text-gray-400 text-xs">Provider: {company.provider}</p>}
+            </div>
           )}
         </div>
 
