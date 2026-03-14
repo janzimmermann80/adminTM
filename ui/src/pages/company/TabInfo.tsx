@@ -66,7 +66,7 @@ export const TabInfo = ({ company, onReload }: Props) => {
   const [error, setError] = useState('')
 
   const [basic, setBasic] = useState({
-    company: company.company,
+    company: company.company ?? '',
     street: company.street ?? '',
     city: company.city ?? '',
     zip: company.zip ?? '',
@@ -139,8 +139,13 @@ export const TabInfo = ({ company, onReload }: Props) => {
     finally { setSaving(false) }
   }
 
-  const inputCls = 'border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-teal-500 focus:border-teal-500 outline-none w-full'
+  // Styly inputů — read-only vs editovatelné
+  const roBase = 'w-full px-3 py-1.5 text-sm rounded-lg border outline-none'
+  const roCls = `${roBase} bg-gray-50 border-gray-200 text-gray-800 cursor-default select-text`
+  const editCls = `${roBase} bg-white border-gray-300 focus:ring-2 focus:ring-teal-500 focus:border-teal-500`
   const labelCls = 'block text-xs text-gray-500 mb-0.5'
+
+  const inp = (ro: boolean) => ro ? roCls : editCls
 
   return (
     <div className="space-y-6">
@@ -148,7 +153,6 @@ export const TabInfo = ({ company, onReload }: Props) => {
         <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">{error}</div>
       )}
 
-      {/* ── Základní údaje + Smlouvy a služby vedle sebe ─────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Karta se dvěma taby: Sídlo / Fakturační adresa */}
@@ -182,154 +186,133 @@ export const TabInfo = ({ company, onReload }: Props) => {
             </button>
           </div>
 
-          {/* Tab obsah */}
           <div className="p-4">
+            {/* ── Tab Sídlo ─────────────────────────────────────────── */}
             {basicTab === 'sidlo' && (
               <>
                 <div className="flex items-center justify-between mb-3">
                   <SectionTitle>Základní údaje</SectionTitle>
-                  {!editBasic && <EditBtn onClick={() => setEditBasic(true)} />}
+                  {!editBasic
+                    ? <EditBtn onClick={() => setEditBasic(true)} />
+                    : <span className="text-xs text-teal-600 font-medium">Editace</span>
+                  }
                 </div>
-
-                {editBasic ? (
-                  <>
-                    <div className="space-y-2">
-                      <div>
-                        <label className={labelCls}>Název firmy</label>
-                        <input className={inputCls} value={basic.company} onChange={e => setBasic(p => ({ ...p, company: e.target.value }))} />
-                      </div>
-                      <div>
-                        <label className={labelCls}>Ulice</label>
-                        <input className={inputCls} value={basic.street} onChange={e => setBasic(p => ({ ...p, street: e.target.value }))} />
-                      </div>
-                      <div className="flex gap-2">
-                        <div className="w-20 shrink-0">
-                          <label className={labelCls}>PSČ</label>
-                          <input className={inputCls} value={basic.zip} onChange={e => setBasic(p => ({ ...p, zip: e.target.value }))} />
-                        </div>
-                        <div className="flex-1">
-                          <label className={labelCls}>Město</label>
-                          <input className={inputCls} value={basic.city} onChange={e => setBasic(p => ({ ...p, city: e.target.value }))} />
-                        </div>
-                        <div className="w-14 shrink-0">
-                          <label className={labelCls}>Stát</label>
-                          <input className={inputCls} value={basic.country} onChange={e => setBasic(p => ({ ...p, country: e.target.value }))} />
-                        </div>
-                        <div className="w-16 shrink-0">
-                          <label className={labelCls}>Oblast</label>
-                          <input className={inputCls} value={basic.region} onChange={e => setBasic(p => ({ ...p, region: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <div className="flex-1">
-                          <label className={labelCls}>IČO</label>
-                          <input className={inputCls} value={basic.cin} onChange={e => setBasic(p => ({ ...p, cin: e.target.value }))} />
-                        </div>
-                        <div className="flex-1">
-                          <label className={labelCls}>DIČ</label>
-                          <input className={inputCls} value={basic.tin} onChange={e => setBasic(p => ({ ...p, tin: e.target.value }))} />
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <div className="w-24 shrink-0">
-                          <label className={labelCls}>Banka</label>
-                          <input className={inputCls} value={basic.bank} onChange={e => setBasic(p => ({ ...p, bank: e.target.value }))} />
-                        </div>
-                        <div className="flex-1">
-                          <label className={labelCls}>Číslo účtu</label>
-                          <input className={inputCls} value={basic.account} onChange={e => setBasic(p => ({ ...p, account: e.target.value }))} />
-                        </div>
-                        <div className="w-24 shrink-0">
-                          <label className={labelCls}>Pobočka</label>
-                          <input className={inputCls} value={basic.branch} onChange={e => setBasic(p => ({ ...p, branch: e.target.value }))} />
-                        </div>
-                      </div>
-                    </div>
-                    <SaveBar onSave={saveBasic} onCancel={() => setEditBasic(false)} saving={saving} />
-                  </>
-                ) : (
-                  <div className="space-y-1.5 text-sm">
-                    <p className="font-semibold text-gray-900 text-base">{company.company}</p>
-                    {company.street && <p className="text-gray-700">{company.street}</p>}
-                    <p className="text-gray-700">
-                      {[company.zip, company.city].filter(Boolean).join(' ')}
-                      {company.country && <span className="ml-2 bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 text-xs font-mono">{company.country}</span>}
-                      {company.region && <span className="ml-2 text-gray-400 text-xs">O: {company.region}</span>}
-                    </p>
-                    {(company.cin || company.tin) && (
-                      <p className="text-gray-500">
-                        {company.cin && <span>IČO: <strong className="text-gray-800">{company.cin}</strong></span>}
-                        {company.cin && company.tin && <span className="mx-2 text-gray-300">|</span>}
-                        {company.tin && <span>DIČ: <strong className="text-gray-800">{company.tin}</strong></span>}
-                      </p>
-                    )}
-                    {(company.bank || company.account) && (
-                      <p className="text-gray-500">
-                        {company.bank && <span>Banka: <strong className="text-gray-800">{company.bank}</strong></span>}
-                        {company.bank && company.account && <span className="mx-2 text-gray-300">|</span>}
-                        {company.account && <span>Účet: <strong className="text-gray-800">{company.account}</strong></span>}
-                        {company.branch && <span className="ml-2 text-gray-400 text-xs">({company.branch})</span>}
-                      </p>
-                    )}
-                    {company.provider && <p className="text-gray-400 text-xs">Provider: {company.provider}</p>}
+                <div className="space-y-2">
+                  <div>
+                    <label className={labelCls}>Název firmy</label>
+                    <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.company}
+                      onChange={e => setBasic(p => ({ ...p, company: e.target.value }))} />
                   </div>
-                )}
+                  <div>
+                    <label className={labelCls}>Ulice</label>
+                    <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.street}
+                      onChange={e => setBasic(p => ({ ...p, street: e.target.value }))} />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="w-20 shrink-0">
+                      <label className={labelCls}>PSČ</label>
+                      <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.zip}
+                        onChange={e => setBasic(p => ({ ...p, zip: e.target.value }))} />
+                    </div>
+                    <div className="flex-1">
+                      <label className={labelCls}>Město</label>
+                      <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.city}
+                        onChange={e => setBasic(p => ({ ...p, city: e.target.value }))} />
+                    </div>
+                    <div className="w-14 shrink-0">
+                      <label className={labelCls}>Stát</label>
+                      <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.country}
+                        onChange={e => setBasic(p => ({ ...p, country: e.target.value }))} />
+                    </div>
+                    <div className="w-16 shrink-0">
+                      <label className={labelCls}>Oblast</label>
+                      <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.region}
+                        onChange={e => setBasic(p => ({ ...p, region: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex-1">
+                      <label className={labelCls}>IČO</label>
+                      <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.cin}
+                        onChange={e => setBasic(p => ({ ...p, cin: e.target.value }))} />
+                    </div>
+                    <div className="flex-1">
+                      <label className={labelCls}>DIČ</label>
+                      <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.tin}
+                        onChange={e => setBasic(p => ({ ...p, tin: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="w-24 shrink-0">
+                      <label className={labelCls}>Banka</label>
+                      <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.bank}
+                        onChange={e => setBasic(p => ({ ...p, bank: e.target.value }))} />
+                    </div>
+                    <div className="flex-1">
+                      <label className={labelCls}>Číslo účtu</label>
+                      <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.account}
+                        onChange={e => setBasic(p => ({ ...p, account: e.target.value }))} />
+                    </div>
+                    <div className="w-24 shrink-0">
+                      <label className={labelCls}>Pobočka</label>
+                      <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.branch}
+                        onChange={e => setBasic(p => ({ ...p, branch: e.target.value }))} />
+                    </div>
+                  </div>
+                  {company.provider && (
+                    <div>
+                      <label className={labelCls}>Provider</label>
+                      <input className={roCls} readOnly value={company.provider} />
+                    </div>
+                  )}
+                </div>
+                {editBasic && <SaveBar onSave={saveBasic} onCancel={() => setEditBasic(false)} saving={saving} />}
               </>
             )}
 
+            {/* ── Tab Fakturační adresa ──────────────────────────────── */}
             {basicTab === 'fakturacni' && (
               <>
                 <div className="flex items-center justify-between mb-3">
                   <SectionTitle>Fakturační adresa</SectionTitle>
-                  {!editInvoice && <EditBtn onClick={() => setEditInvoice(true)} />}
+                  {!editInvoice
+                    ? <EditBtn onClick={() => setEditInvoice(true)} />
+                    : <span className="text-xs text-teal-600 font-medium">Editace</span>
+                  }
                 </div>
-
-                {editInvoice ? (
-                  <>
-                    <div className="space-y-2">
-                      <div>
-                        <label className={labelCls}>Firma</label>
-                        <input className={inputCls} value={inv.company} onChange={e => setInv(p => ({ ...p, company: e.target.value }))} />
-                      </div>
-                      <div>
-                        <label className={labelCls}>Ulice</label>
-                        <input className={inputCls} value={inv.street} onChange={e => setInv(p => ({ ...p, street: e.target.value }))} />
-                      </div>
-                      <div className="flex gap-2">
-                        <div className="w-20 shrink-0">
-                          <label className={labelCls}>PSČ</label>
-                          <input className={inputCls} value={inv.zip} onChange={e => setInv(p => ({ ...p, zip: e.target.value }))} />
-                        </div>
-                        <div className="flex-1">
-                          <label className={labelCls}>Město</label>
-                          <input className={inputCls} value={inv.city} onChange={e => setInv(p => ({ ...p, city: e.target.value }))} />
-                        </div>
-                        <div className="w-14 shrink-0">
-                          <label className={labelCls}>Stát</label>
-                          <input className={inputCls} value={inv.country} onChange={e => setInv(p => ({ ...p, country: e.target.value }))} />
-                        </div>
-                      </div>
-                    </div>
-                    <SaveBar onSave={saveInvoice} onCancel={() => setEditInvoice(false)} saving={saving} />
-                  </>
-                ) : (
-                  <div className="space-y-1.5 text-sm">
-                    {hasInvoiceAddress ? (
-                      <>
-                        <p className="font-semibold text-gray-900 text-base">{company.invoice_company}</p>
-                        {company.invoice_street && <p className="text-gray-700">{company.invoice_street}</p>}
-                        <p className="text-gray-700">
-                          {[company.invoice_zip, company.invoice_city].filter(Boolean).join(' ')}
-                          {company.invoice_country && (
-                            <span className="ml-2 bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 text-xs font-mono">{company.invoice_country}</span>
-                          )}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-gray-400">Fakturační adresa není vyplněna (použije se adresa firmy)</p>
-                    )}
+                <div className="space-y-2">
+                  <div>
+                    <label className={labelCls}>Firma</label>
+                    <input className={inp(!editInvoice)} readOnly={!editInvoice} value={inv.company}
+                      onChange={e => setInv(p => ({ ...p, company: e.target.value }))} />
                   </div>
+                  <div>
+                    <label className={labelCls}>Ulice</label>
+                    <input className={inp(!editInvoice)} readOnly={!editInvoice} value={inv.street}
+                      onChange={e => setInv(p => ({ ...p, street: e.target.value }))} />
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="w-20 shrink-0">
+                      <label className={labelCls}>PSČ</label>
+                      <input className={inp(!editInvoice)} readOnly={!editInvoice} value={inv.zip}
+                        onChange={e => setInv(p => ({ ...p, zip: e.target.value }))} />
+                    </div>
+                    <div className="flex-1">
+                      <label className={labelCls}>Město</label>
+                      <input className={inp(!editInvoice)} readOnly={!editInvoice} value={inv.city}
+                        onChange={e => setInv(p => ({ ...p, city: e.target.value }))} />
+                    </div>
+                    <div className="w-14 shrink-0">
+                      <label className={labelCls}>Stát</label>
+                      <input className={inp(!editInvoice)} readOnly={!editInvoice} value={inv.country}
+                        onChange={e => setInv(p => ({ ...p, country: e.target.value }))} />
+                    </div>
+                  </div>
+                </div>
+                {!editInvoice && !hasInvoiceAddress && (
+                  <p className="text-xs text-gray-400 mt-3">Fakturační adresa není vyplněna (použije se adresa firmy)</p>
                 )}
+                {editInvoice && <SaveBar onSave={saveInvoice} onCancel={() => setEditInvoice(false)} saving={saving} />}
               </>
             )}
           </div>
@@ -356,12 +339,12 @@ export const TabInfo = ({ company, onReload }: Props) => {
                   <div key={vk} className="grid grid-cols-2 gap-2 border-b border-gray-50 pb-2 last:border-0">
                     <div>
                       <label className={labelCls}>{label}</label>
-                      <input className={inputCls} value={String(svc[vk] ?? '')}
+                      <input className={editCls} value={String(svc[vk] ?? '')}
                         onChange={e => setSvc(p => ({ ...p, [vk]: e.target.value }))} />
                     </div>
                     <div>
                       <label className={labelCls}>Datum</label>
-                      <input type="date" className={inputCls} value={String(svc[dk] ?? '')}
+                      <input type="date" className={editCls} value={String(svc[dk] ?? '')}
                         onChange={e => setSvc(p => ({ ...p, [dk]: e.target.value }))} />
                     </div>
                   </div>
@@ -369,17 +352,17 @@ export const TabInfo = ({ company, onReload }: Props) => {
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className={labelCls}>Výměna nároků</label>
-                    <input className={inputCls} value={String(svc.claim_exchange ?? '')}
+                    <input className={editCls} value={String(svc.claim_exchange ?? '')}
                       onChange={e => setSvc(p => ({ ...p, claim_exchange: e.target.value }))} />
                   </div>
                   <div>
                     <label className={labelCls}>Credit tip SMS</label>
-                    <input type="number" className={inputCls} value={String(svc.credit_tip_sms ?? '')}
+                    <input type="number" className={editCls} value={String(svc.credit_tip_sms ?? '')}
                       onChange={e => setSvc(p => ({ ...p, credit_tip_sms: e.target.value }))} />
                   </div>
                   <div>
                     <label className={labelCls}>Slevová reklama (%)</label>
-                    <input type="number" className={inputCls} value={String(svc.advert_discount ?? '')}
+                    <input type="number" className={editCls} value={String(svc.advert_discount ?? '')}
                       onChange={e => setSvc(p => ({ ...p, advert_discount: e.target.value }))} />
                   </div>
                   <div className="flex items-end pb-1.5">
