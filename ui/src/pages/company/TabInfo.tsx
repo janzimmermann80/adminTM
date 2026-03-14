@@ -190,14 +190,7 @@ export const TabInfo = ({ company, onReload }: Props) => {
             {/* ── Tab Sídlo ─────────────────────────────────────────── */}
             {basicTab === 'sidlo' && (
               <>
-                <div className="flex items-center justify-between mb-3">
-                  <SectionTitle>Základní údaje</SectionTitle>
-                  {!editBasic
-                    ? <EditBtn onClick={() => setEditBasic(true)} />
-                    : <span className="text-xs text-teal-600 font-medium">Editace</span>
-                  }
-                </div>
-                <div className="space-y-2">
+                <div className="space-y-2" onFocus={() => setEditBasic(true)}>
                   <div>
                     <label className={labelCls}>Název firmy</label>
                     <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.company}
@@ -273,14 +266,7 @@ export const TabInfo = ({ company, onReload }: Props) => {
             {/* ── Tab Fakturační adresa ──────────────────────────────── */}
             {basicTab === 'fakturacni' && (
               <>
-                <div className="flex items-center justify-between mb-3">
-                  <SectionTitle>Fakturační adresa</SectionTitle>
-                  {!editInvoice
-                    ? <EditBtn onClick={() => setEditInvoice(true)} />
-                    : <span className="text-xs text-teal-600 font-medium">Editace</span>
-                  }
-                </div>
-                <div className="space-y-2">
+                <div className="space-y-2" onFocus={() => setEditInvoice(true)}>
                   <div>
                     <label className={labelCls}>Firma</label>
                     <input className={inp(!editInvoice)} readOnly={!editInvoice} value={inv.company}
