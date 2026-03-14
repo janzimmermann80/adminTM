@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+ui/node_modules/
+
+# Build output
+ui/dist/
+
+# Environment & secrets
+.env
+*.env
+.env.*
+
+# Logs & runtime
+api.log
+*.log
+
+# Database
+bank.db
+bank.db-shm
+bank.db-wal
+
+# Certs
+certs/
+
+# Patched copy (generated at runtime)
+/home/dev/admin-data-patched/
+
+# OS
+.DS_Store
+Thumbs.db
