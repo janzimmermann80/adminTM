@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { CompanyDetail } from '../../types'
 import { formatDate, parseApiDate } from '../../utils'
-import { updateCompany, updateServices, updateInvoiceAddress } from '../../api'
+import { updateCompany, updateServices, updateInvoiceAddress, getSearchMeta } from '../../api'
 import { Spinner } from '../../components/Spinner'
 
 interface Props {
@@ -64,6 +64,11 @@ export const TabInfo = ({ company, onReload }: Props) => {
   const [editInvoice, setEditInvoice] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [tariffs, setTariffs] = useState<{ tariff: string; name: string }[]>([])
+
+  useEffect(() => {
+    getSearchMeta().then(m => setTariffs(m.tariffs)).catch(() => {})
+  }, [])
 
   const [basic, setBasic] = useState({
     company: company.company ?? '',
@@ -77,6 +82,7 @@ export const TabInfo = ({ company, onReload }: Props) => {
     account: company.account ?? '',
     branch: company.branch ?? '',
     region: company.region ?? '',
+    tariff: company.tariff ?? '',
   })
 
   const [svc, setSvc] = useState({
@@ -251,6 +257,27 @@ export const TabInfo = ({ company, onReload }: Props) => {
                       <input className={inp(!editBasic)} readOnly={!editBasic} value={basic.branch}
                         onChange={e => setBasic(p => ({ ...p, branch: e.target.value }))} />
                     </div>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Tarif</label>
+                    {editBasic ? (
+                      <select
+                        className={`${editCls} cursor-pointer`}
+                        value={basic.tariff}
+                        onChange={e => setBasic(p => ({ ...p, tariff: e.target.value }))}
+                      >
+                        <option value="">— bez tarifu —</option>
+                        {tariffs.map(t => (
+                          <option key={t.tariff} value={t.tariff}>{t.name}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        className={roCls}
+                        readOnly
+                        value={tariffs.find(t => t.tariff === basic.tariff)?.name ?? basic.tariff ?? ''}
+                      />
+                    )}
                   </div>
                   {company.provider && (
                     <div>
