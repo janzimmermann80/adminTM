@@ -258,27 +258,6 @@ export const TabInfo = ({ company, onReload }: Props) => {
                         onChange={e => setBasic(p => ({ ...p, branch: e.target.value }))} />
                     </div>
                   </div>
-                  <div>
-                    <label className={labelCls}>Tarif</label>
-                    {editBasic ? (
-                      <select
-                        className={`${editCls} cursor-pointer`}
-                        value={basic.tariff}
-                        onChange={e => setBasic(p => ({ ...p, tariff: e.target.value }))}
-                      >
-                        <option value="">— bez tarifu —</option>
-                        {tariffs.map(t => (
-                          <option key={t.tariff} value={t.tariff}>{t.name}</option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        className={roCls}
-                        readOnly
-                        value={tariffs.find(t => t.tariff === basic.tariff)?.name ?? basic.tariff ?? ''}
-                      />
-                    )}
-                  </div>
                   {company.provider && (
                     <div>
                       <label className={labelCls}>Provider</label>
@@ -378,6 +357,19 @@ export const TabInfo = ({ company, onReload }: Props) => {
                     <input type="number" className={editCls} value={String(svc.advert_discount ?? '')}
                       onChange={e => setSvc(p => ({ ...p, advert_discount: e.target.value }))} />
                   </div>
+                  <div>
+                    <label className={labelCls}>Tarif</label>
+                    <select
+                      className={`${editCls} cursor-pointer`}
+                      value={basic.tariff}
+                      onChange={e => setBasic(p => ({ ...p, tariff: e.target.value }))}
+                    >
+                      <option value="">— bez tarifu —</option>
+                      {tariffs.map(t => (
+                        <option key={t.tariff} value={t.tariff}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
                   <div className="flex items-end pb-1.5">
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input type="checkbox" checked={Boolean(svc.send_emails_from_their_domain)}
@@ -397,6 +389,7 @@ export const TabInfo = ({ company, onReload }: Props) => {
                 <span className="text-xs text-gray-400 uppercase tracking-wide">Verze</span>
                 <span className="text-xs text-gray-400 uppercase tracking-wide w-20 text-right">Datum</span>
               </div>
+              <ServiceRow label="Tarif" version={tariffs.find(t => t.tariff === company.tariff)?.name ?? company.tariff ?? null} />
               <ServiceRow label="Smlouva"          version={company.contract}   date={company.contract_date} />
               <ServiceRow label="Program odeslán"  version={company.prog_sent}  date={company.prog_sent_date} />
               <ServiceRow label="Program zapůjčen" version={company.prog_lent}  date={company.prog_lent_date} />
