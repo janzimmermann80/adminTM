@@ -402,7 +402,7 @@ export const Vyhledavani = () => {
               <tbody className="divide-y divide-gray-100">
                 {results.map(c => (
                   <tr key={c.company_key}
-                    onClick={() => navigate(`/company/${c.company_key}`)}
+                    onClick={() => window.open(`#/company/${c.company_key}`, '_blank')}
                     className="hover:bg-teal-50 cursor-pointer transition-colors">
                     <td className="px-3 py-2 font-mono text-xs text-gray-500">{c.id}</td>
                     <td className="px-3 py-2 font-medium text-gray-900">{c.company}</td>

@@ -81,7 +81,7 @@ export const Search = () => {
   }
 
   const handleRowClick = (key: number) => {
-    navigate(`/company/${key}`)
+    window.open(`#/company/${key}`, '_blank')
   }
 
   return (

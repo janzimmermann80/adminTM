@@ -402,7 +402,7 @@ export const Overview = () => {
                     <div className="flex items-center gap-2 mb-0.5">
                       <span className="text-xs text-gray-400 shrink-0">{formatDate(d.time)}</span>
                       {d.company && (
-                        <Link to={`/company/${d.company_key}`} className="text-xs text-[#0a6b6b] hover:underline truncate">
+                        <Link to={`/company/${d.company_key}`} target="_blank" className="text-xs text-[#0a6b6b] hover:underline truncate">
                           {d.company}
                         </Link>
                       )}
