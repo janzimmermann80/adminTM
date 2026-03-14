@@ -45,6 +45,28 @@ else:
     print('Patch SKIP: last_modif pattern not found', file=sys.stderr)
 PYEOF
 
+# Patch: branch/tariff/region — NULLIF pro prázdný string (FK constraint)
+python3 - <<'PYEOF'
+import sys
+f = '/home/dev/admin-data-patched/src/routes/companies/index.ts'
+src = open(f).read()
+fixes = [
+    ("COALESCE(${body.branch ?? null}, branch)", "COALESCE(NULLIF(${body.branch ?? null}, ''), branch)"),
+    ("COALESCE(${body.tariff ?? null}, tariff)", "COALESCE(NULLIF(${body.tariff ?? null}, ''), tariff)"),
+    ("COALESCE(${body.region ?? null}, region)", "COALESCE(NULLIF(${body.region ?? null}, ''), region)"),
+]
+changed = False
+for old, new in fixes:
+    if old in src:
+        src = src.replace(old, new)
+        changed = True
+if changed:
+    open(f, 'w').write(src)
+    print('Patch OK: NULLIF for FK fields', file=sys.stderr)
+else:
+    print('Patch SKIP: NULLIF patterns not found', file=sys.stderr)
+PYEOF
+
 # Spusť backend z patchované kopie
 cd "$MYDIR"
 exec node /services/admin-data/node_modules/.bin/tsx watch \
