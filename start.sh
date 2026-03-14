@@ -31,6 +31,20 @@ else:
     print('Patch SKIP: pattern not found', file=sys.stderr)
 PYEOF
 
+# Patch: last_modif datum — ISO formát místo toLocaleDateString (cs-CZ nečte PostgreSQL)
+python3 - <<'PYEOF'
+import sys
+f = '/home/dev/admin-data-patched/src/routes/companies/index.ts'
+src = open(f).read()
+old = "const now = new Date().toLocaleDateString('cs-CZ')"
+new = "const now = new Date().toISOString().split('T')[0]"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: last_modif date format', file=sys.stderr)
+else:
+    print('Patch SKIP: last_modif pattern not found', file=sys.stderr)
+PYEOF
+
 # Spusť backend z patchované kopie
 cd "$MYDIR"
 exec node /services/admin-data/node_modules/.bin/tsx watch \
