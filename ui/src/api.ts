@@ -159,3 +159,56 @@ export const sendSms = (body: {
 
 export const listWorkers = () => get<any[]>('/workers')
 export const getWorker = (initials: string) => get<any>(`/workers/${encodeURIComponent(initials)}`)
+
+// ── Bank ──────────────────────────────────────────────────────────────────────
+
+export const getBankStatements = () => get<any[]>('/bank/statements')
+export const deleteBankStatement = (id: number) => del<any>(`/bank/statements/${id}`)
+
+export const getBankTransactions = (params: {
+  unmatched?: boolean
+  credit_debit?: string
+  date_from?: string
+  date_to?: string
+  vs?: string
+  statement_id?: number
+  limit?: number
+  offset?: number
+}) => {
+  const q = new URLSearchParams()
+  if (params.unmatched)    q.set('unmatched', 'true')
+  if (params.credit_debit) q.set('credit_debit', params.credit_debit)
+  if (params.date_from)    q.set('date_from', params.date_from)
+  if (params.date_to)      q.set('date_to', params.date_to)
+  if (params.vs)           q.set('vs', params.vs)
+  if (params.statement_id) q.set('statement_id', String(params.statement_id))
+  q.set('limit',  String(params.limit  ?? 50))
+  q.set('offset', String(params.offset ?? 0))
+  return get<any[]>(`/bank/transactions?${q}`)
+}
+
+export const matchBankTransaction = (txId: number, invoiceKey: number, isProforma = false) =>
+  post<any>(`/bank/transactions/${txId}/match`, isProforma ? { company_key: invoiceKey } : { invoice_key: invoiceKey })
+
+export const unmatchBankTransaction = (txId: number) =>
+  del<any>(`/bank/transactions/${txId}/match`)
+
+export const searchBankInvoices = (q: string, amount?: number, proforma?: boolean) => {
+  const params = new URLSearchParams({ q })
+  if (amount != null) params.set('amount', String(amount))
+  if (proforma) params.set('proforma', 'true')
+  return get<any[]>(`/bank/invoices-search?${params}`)
+}
+
+export const uploadBankXml = (files: FileList | File[]) => {
+  const form = new FormData()
+  Array.from(files).forEach(f => form.append('files', f))
+  return fetch(buildUrl('/bank/upload-xml'), {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${getToken()}` },
+    body: form,
+  }).then(async r => {
+    if (!r.ok) { const t = await r.text(); throw new Error(JSON.parse(t).error ?? t) }
+    return r.json() as Promise<{ imported: number; skipped: number; errors: string[] }>
+  })
+}

@@ -127,7 +127,7 @@ export const CompanyDetail = () => {
         <div className="p-5">
           {tab === 'info'     && <TabInfo     company={company} onReload={reload} />}
           {tab === 'contacts' && <TabContacts companyKey={String(id)} />}
-          {tab === 'invoices' && <TabInvoices companyKey={String(id)} />}
+          {tab === 'invoices' && <TabInvoices companyKey={String(id)} companyId={String(company?.id ?? '')} />}
           {tab === 'vehicles' && <TabVehicles companyKey={String(id)} />}
           {tab === 'notes'    && <TabNotes    companyKey={String(id)} />}
         </div>

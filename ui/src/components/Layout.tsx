@@ -107,7 +107,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Odeslat SMS',     icon: <IconSms />,        disabled: true },
   { label: 'Kampaně',         icon: <IconCampaign />,   disabled: true },
   { label: 'AI asistent',     icon: <IconAI />,         disabled: true },
-  { label: 'Banka',           icon: <IconBank />,       disabled: true },
+  { to: '/bank',              label: 'Banka',           icon: <IconBank /> },
 ]
 
 export const Layout = ({ children }: { children: React.ReactNode }) => {

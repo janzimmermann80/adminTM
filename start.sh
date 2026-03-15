@@ -461,6 +461,152 @@ else:
     print('Patch SKIP: Chrome launch args already patched', file=sys.stderr)
 PYEOF
 
+# Patch: bankDb.ts — přesuň DB do /home/dev/ (bank.db v /services/admin-data je root-owned)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/db/bankDb.ts'
+src = open(f).read()
+old = "const DB_PATH = process.env.BANK_DB_PATH ?? path.resolve('/services/admin-data/bank.db')"
+new = "const DB_PATH = process.env.BANK_DB_PATH ?? '/home/dev/bank.db'"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: bankDb path', file=sys.stderr)
+else:
+    print('Patch SKIP: bankDb path already patched', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — oprav encoding detection pro ČSOB FINSTA (windows-1250 bez deklarace)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+old = """        // Detekce encodingu z XML hlavičky (windows-1250, iso-8859-2, apod.)
+        const encodingMatch = rawBuffer.slice(0, 200).toString('ascii').match(/encoding=["']([^"']+)["']/i)
+        const encoding = encodingMatch ? encodingMatch[1] : 'utf-8'
+        const xmlContent = iconv.decode(rawBuffer, encoding)"""
+new = """        // Detekce encodingu z XML hlavičky (windows-1250, iso-8859-2, apod.)
+        const header = rawBuffer.slice(0, 400).toString('latin1')
+        const encodingMatch = header.match(/encoding=["']([^"']+)["']/i)
+        let encoding = encodingMatch ? encodingMatch[1] : ''
+        // Pokud není encoding deklarován, detekujeme podle obsahu:
+        // ČSOB FINSTA soubory jsou typicky windows-1250
+        if (!encoding) {
+          const hasHighBytes = rawBuffer.slice(0, 2000).some((b: number) => b >= 0x80 && b <= 0x9F)
+          encoding = hasHighBytes ? 'windows-1250' : 'utf-8'
+        }
+        const xmlContent = iconv.decode(rawBuffer, encoding)"""
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: bank.ts encoding detection', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts encoding already patched', file=sys.stderr)
+PYEOF
+
+# Patch: JWT — přidej smtpUser/smtpPass (přihlašovací credentials) do tokenu
+python3 - <<'PYEOF'
+import sys
+
+f = '/services/admin-data/patched/src/types/index.ts'
+src = open(f).read()
+old = "  provider: string\n  region: string\n}"
+new = "  provider: string\n  region: string\n  smtpUser: string\n  smtpPass: string\n}"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: JwtPayload smtpUser/smtpPass', file=sys.stderr)
+else:
+    print('Patch SKIP: JwtPayload already patched', file=sys.stderr)
+
+f = '/services/admin-data/patched/src/routes/auth.ts'
+src = open(f).read()
+old = "      provider: row.provider ?? '',\n      region: row.ui_lang ?? '',\n    }"
+new = "      provider: row.provider ?? '',\n      region: row.ui_lang ?? '',\n      smtpUser: username,\n      smtpPass: password,\n    }"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: auth.ts smtpUser/smtpPass', file=sys.stderr)
+else:
+    print('Patch SKIP: auth.ts already patched', file=sys.stderr)
+PYEOF
+
+# Patch: sendMail.ts — použij SMTP místo sendmail, credentials z přihlášeného uživatele
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/sendMail.ts'
+src = open(f).read()
+old = "      const transport = nodemailer.createTransport({ sendmail: true, newline: 'unix', path: '/usr/sbin/sendmail' })"
+new = "      const transport = nodemailer.createTransport({ host: 'nweb.euro-sped.cz', port: 25, secure: false, ignoreTLS: true, auth: { user: smtpUser, pass: smtpPass } })"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: sendMail SMTP', file=sys.stderr)
+else:
+    print('Patch SKIP: sendMail SMTP already patched or pattern not found', file=sys.stderr)
+PYEOF
+
+# Patch: invoicing.ts — použij SMTP místo env proměnných, credentials z přihlášeného uživatele
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/invoicing.ts'
+src = open(f).read()
+old = """      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST ?? 'smtp.gmail.com',
+        port: Number(process.env.SMTP_PORT ?? 587),"""
+new = """      const transporter = nodemailer.createTransport({
+        host: 'nweb.euro-sped.cz',
+        port: 25,
+        secure: false,
+        ignoreTLS: true,"""
+if old in src:
+    # Také nahraď auth credentials
+    src2 = src.replace(old, new)
+    old2 = "          user: process.env.SMTP_USER,\n          pass: process.env.SMTP_PASS,"
+    new2 = "          user: smtpUser,\n          pass: smtpPass,"
+    if old2 in src2:
+        src2 = src2.replace(old2, new2)
+    open(f, 'w').write(src2)
+    print('Patch OK: invoicing SMTP', file=sys.stderr)
+else:
+    print('Patch SKIP: invoicing SMTP already patched or pattern not found', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — autoMatch: VS dekompozice (company.id), přeskočit series 5, invoices-search series filtr
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+
+# 1. autoMatch query
+old1 = "      SELECT invoice_key FROM provider.invoice\n      WHERE (series::text || RIGHT(id::text, 5) || LPAD(number::text, 4, '0')) = ${tx.vs}\n        AND cancellation IS NULL AND settlement IS NULL\n      LIMIT 1"
+new1 = "      SELECT i.invoice_key FROM provider.invoice i\n      JOIN provider.company c ON c.company_key = i.company_key\n      WHERE i.series::text = LEFT(${tx.vs}, 1)\n        AND RIGHT(c.id::text, LENGTH(${tx.vs}) - 5) = SUBSTRING(${tx.vs}, 2, LENGTH(${tx.vs}) - 5)\n        AND i.number = RIGHT(${tx.vs}, 4)::int\n        AND i.cancellation IS NULL\n      LIMIT 1"
+if old1 in src:
+    src = src.replace(old1, new1)
+    print('Patch OK: bank.ts autoMatch query', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts autoMatch already patched', file=sys.stderr)
+
+# 2. přeskočit series 5 v autoMatch
+old2 = "      AND vs IS NOT NULL AND vs != '' AND credit_debit = 'CRDT'\n  `).all(statementId) as any[]"
+new2 = "      AND vs IS NOT NULL AND vs != '' AND credit_debit = 'CRDT'\n      AND SUBSTR(vs, 1, 1) != '5'\n  `).all(statementId) as any[]"
+if old2 in src:
+    src = src.replace(old2, new2)
+    print('Patch OK: bank.ts autoMatch skip series 5', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts autoMatch series 5 already patched', file=sys.stderr)
+
+# 3. invoices-search series filtr
+old3 = "    const q = request.query as { q?: string; amount?: string }"
+new3 = "    const q = request.query as { q?: string; amount?: string; series?: string }"
+if old3 in src:
+    src = src.replace(old3, new3)
+    print('Patch OK: bank.ts invoices-search series param', file=sys.stderr)
+
+old4 = "        WHERE i.cancellation IS NULL\n          ${q.q ? pgSql`AND (i.number::text ILIKE ${'%' + q.q + '%'} OR c.company ILIKE ${'%' + q.q + '%'})` : pgSql``}\n          ${q.amount ? pgSql`AND ABS(i.total - ${Number(q.amount)}) < 0.01` : pgSql``}"
+new4 = "        WHERE i.cancellation IS NULL\n          ${q.series ? pgSql`AND i.series = ${Number(q.series)}` : pgSql`AND i.series != 5`}\n          ${q.q ? pgSql`AND (i.number::text ILIKE ${'%' + q.q + '%'} OR c.company ILIKE ${'%' + q.q + '%'})` : pgSql``}\n          ${q.amount ? pgSql`AND ABS(i.total - ${Number(q.amount)}) < 0.01` : pgSql``}"
+if old4 in src:
+    src = src.replace(old4, new4)
+    print('Patch OK: bank.ts invoices-search series filter', file=sys.stderr)
+
+open(f, 'w').write(src)
+PYEOF
+
 # Spusť backend z patchované kopie
 cd "$MYDIR"
 exec node /services/admin-data/node_modules/.bin/tsx watch \

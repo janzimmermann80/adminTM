@@ -9,17 +9,18 @@ import { formatDate, formatNumber } from '../../utils'
 import type { Invoice } from '../../types'
 import { INVOICE_SERIES_LABELS } from '../../types'
 
-interface Props { companyKey: string }
+interface Props { companyKey: string; companyId?: string }
 
 const LIMIT = 10
 
 // ── Email modal ──────────────────────────────────────────────────────────────
-function InvoiceEmailModal({ inv, onClose, onSent }: {
+function InvoiceEmailModal({ inv, companyId, onClose, onSent }: {
   inv: Invoice
+  companyId: string
   onClose: () => void
   onSent: () => void
 }) {
-  const vs = `${inv.series}${String((inv as any).company_id ?? '').slice(-5)}${String(inv.number).padStart(4,'0')}`
+  const vs = `${inv.series}${String(companyId).slice(-5)}${String(inv.number).padStart(4,'0')}`
   const [to, setTo]       = useState('')
   const [cc, setCc]       = useState('')
   const [subject, setSubject] = useState(`Faktura č. ${vs} – ${inv.year}`)
@@ -109,11 +110,13 @@ function InvoiceEmailModal({ inv, onClose, onSent }: {
 }
 
 // ── Edit modal (uhrazení) ────────────────────────────────────────────────────
-function InvoiceEditModal({ inv, onClose, onSaved }: {
+function InvoiceEditModal({ inv, companyId, onClose, onSaved }: {
   inv: Invoice
+  companyId: string
   onClose: () => void
   onSaved: () => void
 }) {
+  const invoiceVs = (i: Invoice) => `${i.series}${String(companyId).slice(-5)}${String(i.number).padStart(4,'0')}`
   const today = new Date().toISOString().slice(0,10)
   const [date, setDate]   = useState(inv.settlement ?? today)
   const [saving, setSaving] = useState(false)
@@ -147,7 +150,7 @@ function InvoiceEditModal({ inv, onClose, onSaved }: {
             <svg className="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
             </svg>
-            Faktura {inv.year}/{inv.series}{inv.number}
+            Faktura {invoiceVs(inv)}
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -197,7 +200,8 @@ function InvoiceEditModal({ inv, onClose, onSaved }: {
 }
 
 // ── Hlavní komponenta ────────────────────────────────────────────────────────
-export const TabInvoices = ({ companyKey }: Props) => {
+export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
+  const invoiceVs = (inv: Invoice) => `${inv.series}${String(companyId).slice(-5)}${String(inv.number).padStart(4,'0')}`
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [total, setTotal]       = useState(0)
   const [offset, setOffset]     = useState(0)
@@ -224,7 +228,7 @@ export const TabInvoices = ({ companyKey }: Props) => {
   const handlePage = (off: number) => { setOffset(off); load(off) }
 
   const handleCancel = async (inv: Invoice) => {
-    if (!confirm(`Stornovat fakturu ${inv.year}/${inv.series}${inv.number}?`)) return
+    if (!confirm(`Stornovat fakturu ${invoiceVs(inv)}?`)) return
     setCancelling(inv.invoice_key)
     try {
       await cancelInvoice(String(inv.invoice_key))
@@ -258,7 +262,8 @@ export const TabInvoices = ({ companyKey }: Props) => {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
-              <th className="px-4 py-3 font-medium">Číslo</th>
+              <th className="px-4 py-3 font-medium">Faktura</th>
+              <th className="px-4 py-3 font-medium hidden sm:table-cell">Proforma</th>
               <th className="px-4 py-3 font-medium hidden sm:table-cell">Série</th>
               <th className="px-4 py-3 font-medium">Vydáno</th>
               <th className="px-4 py-3 font-medium hidden md:table-cell">Splnění</th>
@@ -278,10 +283,10 @@ export const TabInvoices = ({ companyKey }: Props) => {
                 <tr key={inv.invoice_key}
                   className={`hover:bg-gray-50 transition-colors group ${isCancelled ? 'opacity-50' : ''}`}>
                   <td className="px-4 py-3 font-mono text-xs text-gray-600">
-                    {inv.year}/{inv.series}{inv.number}
-                    {inv.proforma_number && (
-                      <span className="ml-1 text-teal-500">(P{inv.proforma_number})</span>
-                    )}
+                    {invoiceVs(inv)}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-teal-600 hidden sm:table-cell">
+                    {inv.proforma_number ? `P${inv.proforma_number}` : ''}
                   </td>
                   <td className="px-4 py-3 hidden sm:table-cell">
                     <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 text-xs">
@@ -377,6 +382,7 @@ export const TabInvoices = ({ companyKey }: Props) => {
       {emailTarget && (
         <InvoiceEmailModal
           inv={emailTarget}
+          companyId={companyId}
           onClose={() => setEmailTarget(null)}
           onSent={() => { setEmailTarget(null); load(offset) }}
         />
@@ -384,6 +390,7 @@ export const TabInvoices = ({ companyKey }: Props) => {
       {editTarget && (
         <InvoiceEditModal
           inv={editTarget}
+          companyId={companyId}
           onClose={() => setEditTarget(null)}
           onSaved={() => { setEditTarget(null); load(offset) }}
         />

@@ -7,6 +7,7 @@ import { Search } from './pages/Search'
 import { CompanyDetail } from './pages/company/CompanyDetail'
 import { WorkerDetail } from './pages/WorkerDetail'
 import { InvoicePrint } from './pages/InvoicePrint'
+import { Bank } from './pages/Bank'
 import { Spinner } from './components/Spinner'
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -28,6 +29,7 @@ const AppRoutes = () => (
     <Route path="/company/:id" element={<ProtectedRoute><CompanyDetail /></ProtectedRoute>} />
     <Route path="/worker/:initials" element={<ProtectedRoute><WorkerDetail /></ProtectedRoute>} />
     <Route path="/invoicing/:id/print" element={<InvoicePrint />} />
+    <Route path="/bank" element={<ProtectedRoute><Bank /></ProtectedRoute>} />
     <Route path="/" element={<Navigate to="/overview" replace />} />
     <Route path="*" element={<Navigate to="/overview" replace />} />
   </Routes>
