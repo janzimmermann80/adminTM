@@ -134,9 +134,11 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
       <div className="px-4 pt-5 pb-4 border-b border-[#0d7f7f]">
         <p className="text-[10px] uppercase tracking-widest text-teal-300 font-semibold mb-1">Admin</p>
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-[#0d8080] flex items-center justify-center text-xs font-bold flex-shrink-0">
+          <Link to={`/worker/${user?.initials ?? ''}`}
+            className="w-8 h-8 rounded-full bg-[#0d8080] hover:bg-[#0f9090] flex items-center justify-center text-xs font-bold flex-shrink-0 transition-colors"
+            title="Můj profil">
             {initials}
-          </div>
+          </Link>
           <span className="text-sm font-medium leading-tight truncate">{user?.name ?? user?.username}</span>
         </div>
       </div>

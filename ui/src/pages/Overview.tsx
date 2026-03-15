@@ -5,16 +5,14 @@ import { Spinner } from '../components/Spinner'
 import { useAuth } from '../context/AuthContext'
 import {
   getStatsOverview,
-  getStatsInvoicesMonthly,
-  getStatsContractsMonthly,
   getStatsClaims,
   getStatsDiaryByOwner,
   getStatsLentMonthly,
   getDiaryUpcoming,
+  getStatsExpiredAccess,
+  getStatsOverdueCompanies,
 } from '../api'
 import { formatDate, formatNumber } from '../utils'
-
-const MONTHS = ['Led','Úno','Bře','Dub','Kvě','Čvn','Čvc','Srp','Zář','Říj','Lis','Pro']
 
 // ── KPI tile ─────────────────────────────────────────────────────────────────
 
@@ -111,11 +109,16 @@ const LentChart = ({ data }: { data: { month: string; count: number }[] }) => {
 // ── Overdue claims tile with region breakdown ─────────────────────────────────
 
 const OverdueTile = ({
-  total, count, byRegion,
+  total, count, companyCount, byRegion, showList, onToggle, activeRegion, onRegionToggle,
 }: {
   total: number
   count: number
+  companyCount: number
   byRegion: { region: string; count: number; total_sum: string }[]
+  showList: boolean
+  onToggle: () => void
+  activeRegion: string | null
+  onRegionToggle: (region: string) => void
 }) => {
   const color = total > 0 ? 'red' : 'gray'
   const bg: Record<string, string> = {
@@ -132,77 +135,39 @@ const OverdueTile = ({
       <div className="min-w-0 flex-1">
         <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-0.5">Pohledávky po splatnosti</p>
         <p className="text-2xl font-bold text-gray-800 leading-none">{formatNumber(total)} Kč</p>
-        <p className="text-xs text-gray-400 mt-1 mb-2">{count} faktur celkem</p>
+        <div className="flex items-center gap-2 mt-1 mb-2">
+          <span className="text-xs text-gray-400">{count} faktur</span>
+          {companyCount > 0 && (
+            <button
+              onClick={onToggle}
+              className="flex items-center gap-1 text-xs text-red-500 font-medium hover:text-red-700 transition-colors"
+            >
+              ({companyCount} firem)
+              <svg className={`w-3 h-3 transition-transform ${showList ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+          )}
+        </div>
         {byRegion.length > 0 && (
           <div className="space-y-1">
             {byRegion.map(r => (
               <div key={r.region} className="flex items-center justify-between gap-2 text-xs">
                 <span className="text-gray-500 font-medium shrink-0">Oblast {r.region}</span>
                 <span className="text-gray-700 font-semibold tabular-nums">{formatNumber(Number(r.total_sum))} Kč</span>
-                <span className="text-gray-400">({r.count})</span>
+                <button
+                  onClick={() => onRegionToggle(r.region)}
+                  className={`flex items-center gap-0.5 font-medium transition-colors ${activeRegion === r.region ? 'text-red-600' : 'text-gray-400 hover:text-red-500'}`}
+                >
+                  ({r.count})
+                  <svg className={`w-3 h-3 transition-transform ${activeRegion === r.region ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
               </div>
             ))}
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-// ── Inline bar chart ─────────────────────────────────────────────────────────
-
-const BarChart = ({
-  data, height = 120, color = '#0a6b6b', formatVal,
-}: {
-  data: { label: string; value: number }[]
-  height?: number
-  color?: string
-  formatVal?: (v: number) => string
-}) => {
-  const max = Math.max(...data.map(d => d.value), 1)
-  const W = 600
-  const barW = Math.floor((W - (data.length - 1) * 4) / data.length)
-  const labelH = 18
-  const valH = 16
-  const chartH = height
-  const totalH = chartH + labelH + valH + 4
-
-  return (
-    <svg viewBox={`0 0 ${W} ${totalH}`} className="w-full" style={{ height: totalH }}>
-      {data.map((d, i) => {
-        const barH = max > 0 ? Math.max((d.value / max) * chartH, d.value > 0 ? 2 : 0) : 0
-        const x = i * (barW + 4)
-        const y = chartH - barH
-        return (
-          <g key={i}>
-            <rect x={x} y={y} width={barW} height={barH} fill={color} rx={2} opacity={d.value > 0 ? 1 : 0} />
-            <text x={x + barW / 2} y={chartH + valH} textAnchor="middle" fontSize={10} fill="#6b7280">
-              {d.label}
-            </text>
-            {d.value > 0 && (
-              <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize={9} fill="#374151">
-                {formatVal ? formatVal(d.value) : d.value}
-              </text>
-            )}
-          </g>
-        )
-      })}
-    </svg>
-  )
-}
-
-// ── Horizontal bar ────────────────────────────────────────────────────────────
-
-const HBar = ({ label, value, max, sub }: { label: string; value: number; max: number; sub?: string }) => {
-  const pct = max > 0 ? (value / max) * 100 : 0
-  return (
-    <div className="mb-3">
-      <div className="flex justify-between text-sm mb-1">
-        <span className="text-gray-700 truncate">{label}</span>
-        <span className="text-gray-500 font-medium ml-2 shrink-0">{value}{sub ? ` ${sub}` : ''}</span>
-      </div>
-      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-        <div className="h-2 bg-[#0a6b6b] rounded-full transition-all" style={{ width: `${pct}%` }} />
       </div>
     </div>
   )
@@ -229,28 +194,71 @@ const claimLabel: Record<string, string> = {
 
 export const Overview = () => {
   const { user } = useAuth()
-  const [overview, setOverview]     = useState<any>(null)
-  const [monthly, setMonthly]       = useState<any[]>([])
-  const [contracts, setContracts]   = useState<any[]>([])
-  const [claims, setClaims]         = useState<any[]>([])
-  const [diaryBy, setDiaryBy]       = useState<any[]>([])
-  const [diary, setDiary]           = useState<any[]>([])
-  const [lent, setLent]             = useState<any[]>([])
-  const [loading, setLoading]       = useState(true)
-  const [year]                      = useState(new Date().getFullYear())
+  const [overview, setOverview]         = useState<any>(null)
+  const [claims, setClaims]             = useState<any[]>([])
+  const [diaryBy, setDiaryBy]           = useState<any[]>([])
+  const [diary, setDiary]               = useState<any[]>([])
+  const [lent, setLent]                 = useState<any[]>([])
+  const [loading, setLoading]           = useState(true)
+  const [showExpired, setShowExpired]       = useState(false)
+  const [expiredList, setExpiredList]       = useState<any[] | null>(null)
+  const [expiredLoading, setExpiredLoading] = useState(false)
+  const [showOverdue, setShowOverdue]           = useState(false)
+  const [overdueList, setOverdueList]           = useState<any[] | null>(null)
+  const [overdueLoading, setOverdueLoading]     = useState(false)
+  const [activeRegion, setActiveRegion]         = useState<string | null>(null)
+  const [regionLists, setRegionLists]           = useState<Record<string, any[]>>({})
+  const [regionLoading, setRegionLoading]       = useState(false)
 
   useEffect(() => {
     const initials = user?.initials ?? ''
     Promise.all([
       getStatsOverview().then(setOverview),
-      getStatsInvoicesMonthly(year).then(setMonthly),
-      getStatsContractsMonthly(year).then(setContracts),
       getStatsClaims().then(setClaims),
       getStatsDiaryByOwner().then(setDiaryBy),
       getStatsLentMonthly().then(setLent),
       initials ? getDiaryUpcoming(initials).then((r: any) => setDiary(r.data ?? [])) : Promise.resolve(),
     ]).finally(() => setLoading(false))
   }, [])
+
+  const handleOverdueToggle = () => {
+    if (!showOverdue && overdueList === null) {
+      setOverdueLoading(true)
+      getStatsOverdueCompanies()
+        .then(setOverdueList)
+        .catch(() => setOverdueList([]))
+        .finally(() => setOverdueLoading(false))
+    }
+    setShowOverdue(v => !v)
+    setActiveRegion(null)
+  }
+
+  const handleRegionToggle = (region: string) => {
+    if (activeRegion === region) {
+      setActiveRegion(null)
+      return
+    }
+    setActiveRegion(region)
+    setShowOverdue(false)
+    if (!regionLists[region]) {
+      setRegionLoading(true)
+      getStatsOverdueCompanies(region)
+        .then(rows => setRegionLists(prev => ({ ...prev, [region]: rows })))
+        .catch(() => setRegionLists(prev => ({ ...prev, [region]: [] })))
+        .finally(() => setRegionLoading(false))
+    }
+  }
+
+  const handleExpiredToggle = () => {
+    if (!showExpired && expiredList === null) {
+      setExpiredLoading(true)
+      getStatsExpiredAccess()
+        .then(setExpiredList)
+        .catch(() => setExpiredList([]))
+        .finally(() => setExpiredLoading(false))
+    }
+    setShowExpired(v => !v)
+  }
 
   if (loading) {
     return (
@@ -261,11 +269,7 @@ export const Overview = () => {
   }
 
   const totalCompanies = (overview?.companies_by_tariff ?? []).reduce((s: number, t: any) => s + (t.count ?? 0), 0)
-  const tariffMax = Math.max(...(overview?.companies_by_tariff ?? []).map((t: any) => t.count), 1)
-  const monthlyMax = Math.max(...monthly.map(m => Number(m.total ?? 0)), 1)
-  const contractMax = Math.max(...contracts.map(c => c.count), 1)
   const totalOverdue = Number(overview?.overdue_claims?.total_sum ?? 0)
-  const totalInvoiced = Number(overview?.invoices_this_year?.total_sum ?? 0)
 
   return (
     <Layout>
@@ -287,7 +291,12 @@ export const Overview = () => {
           <OverdueTile
             total={totalOverdue}
             count={overview?.overdue_claims?.count ?? 0}
+            companyCount={overview?.overdue_claims?.company_count ?? 0}
             byRegion={overview?.overdue_claims_by_region ?? []}
+            showList={showOverdue}
+            onToggle={handleOverdueToggle}
+            activeRegion={activeRegion}
+            onRegionToggle={handleRegionToggle}
           />
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-5 flex gap-4 items-start shadow-sm">
@@ -299,13 +308,200 @@ export const Overview = () => {
             <p className="text-2xl font-bold text-gray-800 leading-none">{overview?.active_vehicles ?? 0}</p>
             <p className="text-xs text-gray-400 mt-1">pozice za posledních 7 dní</p>
             {(overview?.expired_access_with_tracking ?? 0) > 0 && (
-              <p className="text-xs text-red-500 font-medium mt-1">
-                {overview.expired_access_with_tracking} firem bez platného přístupu
-              </p>
+              <button
+                onClick={handleExpiredToggle}
+                className="mt-1.5 flex items-center gap-1 text-xs text-red-500 font-medium hover:text-red-700 transition-colors"
+              >
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                {overview.expired_access_with_tracking} firem bez přístupu
+                <svg className={`w-3 h-3 transition-transform ${showExpired ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
             )}
           </div>
         </div>
       </div>
+
+      {/* Firmy s pohledávkami po splatnosti — rozbalitelná tabulka */}
+      {showOverdue && (
+        <div className="bg-white rounded-xl border border-red-200 shadow-sm mb-5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-red-100 flex items-center justify-between bg-red-50">
+            <span className="text-sm font-semibold text-red-700">Firmy s pohledávkami po splatnosti</span>
+            {overdueLoading
+              ? <Spinner size={4} />
+              : <span className="text-xs text-red-400">{overdueList?.length ?? 0} firem</span>
+            }
+          </div>
+          {overdueLoading ? (
+            <div className="flex justify-center py-8"><Spinner size={8} /></div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
+                    <th className="px-4 py-3 font-medium">ID</th>
+                    <th className="px-4 py-3 font-medium">Firma</th>
+                    <th className="px-4 py-3 font-medium hidden md:table-cell">Město</th>
+                    <th className="px-4 py-3 font-medium hidden lg:table-cell">Tarif</th>
+                    <th className="px-4 py-3 font-medium text-right">Faktur</th>
+                    <th className="px-4 py-3 font-medium text-right">Dluh</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(overdueList ?? []).map((c: any) => (
+                    <tr
+                      key={c.company_key}
+                      onClick={() => window.open(`#/company/${c.company_key}`, '_blank')}
+                      className="hover:bg-red-50 cursor-pointer transition-colors"
+                    >
+                      <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.id}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">{c.company}</td>
+                      <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{c.city}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        {c.tariff_name ? (
+                          <span className="inline-flex items-center bg-teal-100 text-teal-700 rounded px-1.5 py-0.5 text-xs">{c.tariff_name}</span>
+                        ) : c.tariff ? (
+                          <span className="text-gray-400 text-xs">{c.tariff}</span>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-500 text-xs">{c.invoice_count}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-red-600 text-xs tabular-nums whitespace-nowrap">
+                        {formatNumber(Number(c.total_sum))} Kč
+                      </td>
+                    </tr>
+                  ))}
+                  {(overdueList ?? []).length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-gray-400">Žádné pohledávky</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Firmy s pohledávkami — oblast */}
+      {activeRegion && (
+        <div className="bg-white rounded-xl border border-red-200 shadow-sm mb-5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-red-100 flex items-center justify-between bg-red-50">
+            <span className="text-sm font-semibold text-red-700">Pohledávky po splatnosti — Oblast {activeRegion}</span>
+            {regionLoading
+              ? <Spinner size={4} />
+              : <span className="text-xs text-red-400">{regionLists[activeRegion]?.length ?? 0} firem</span>
+            }
+          </div>
+          {regionLoading ? (
+            <div className="flex justify-center py-8"><Spinner size={8} /></div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
+                    <th className="px-4 py-3 font-medium">ID</th>
+                    <th className="px-4 py-3 font-medium">Firma</th>
+                    <th className="px-4 py-3 font-medium hidden md:table-cell">Město</th>
+                    <th className="px-4 py-3 font-medium hidden lg:table-cell">Tarif</th>
+                    <th className="px-4 py-3 font-medium text-right">Faktur</th>
+                    <th className="px-4 py-3 font-medium text-right">Dluh</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(regionLists[activeRegion] ?? []).map((c: any) => (
+                    <tr
+                      key={c.company_key}
+                      onClick={() => window.open(`#/company/${c.company_key}`, '_blank')}
+                      className="hover:bg-red-50 cursor-pointer transition-colors"
+                    >
+                      <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.id}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">{c.company}</td>
+                      <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{c.city}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        {c.tariff_name ? (
+                          <span className="inline-flex items-center bg-teal-100 text-teal-700 rounded px-1.5 py-0.5 text-xs">{c.tariff_name}</span>
+                        ) : c.tariff ? (
+                          <span className="text-gray-400 text-xs">{c.tariff}</span>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3 text-right text-gray-500 text-xs">{c.invoice_count}</td>
+                      <td className="px-4 py-3 text-right font-semibold text-red-600 text-xs tabular-nums whitespace-nowrap">
+                        {formatNumber(Number(c.total_sum))} Kč
+                      </td>
+                    </tr>
+                  ))}
+                  {(regionLists[activeRegion] ?? []).length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-8 text-center text-gray-400">Žádné pohledávky</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Firmy bez přístupu — rozbalitelná tabulka */}
+      {showExpired && (
+        <div className="bg-white rounded-xl border border-red-200 shadow-sm mb-5 overflow-hidden">
+          <div className="px-5 py-3 border-b border-red-100 flex items-center justify-between bg-red-50">
+            <span className="text-sm font-semibold text-red-700">Firmy bez platného přístupu — aktivní vozidla (7 dní)</span>
+            {expiredLoading
+              ? <Spinner size={4} />
+              : <span className="text-xs text-red-400">{expiredList?.length ?? 0} firem</span>
+            }
+          </div>
+          {expiredLoading ? (
+            <div className="flex justify-center py-8"><Spinner size={8} /></div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
+                    <th className="px-4 py-3 font-medium">ID</th>
+                    <th className="px-4 py-3 font-medium">Firma</th>
+                    <th className="px-4 py-3 font-medium hidden md:table-cell">Město</th>
+                    <th className="px-4 py-3 font-medium hidden lg:table-cell">Tarif</th>
+                    <th className="px-4 py-3 font-medium hidden lg:table-cell">Přístup do</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {(expiredList ?? []).map((c: any) => (
+                    <tr
+                      key={c.company_key}
+                      onClick={() => window.open(`#/company/${c.company_key}`, '_blank')}
+                      className="hover:bg-red-50 cursor-pointer transition-colors"
+                    >
+                      <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.id}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">{c.company}</td>
+                      <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{c.city}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        {c.tariff_name ? (
+                          <span className="inline-flex items-center bg-teal-100 text-teal-700 rounded px-1.5 py-0.5 text-xs">{c.tariff_name}</span>
+                        ) : c.tariff ? (
+                          <span className="text-gray-400 text-xs">{c.tariff}</span>
+                        ) : null}
+                      </td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-xs text-red-500 font-medium">
+                        {c.admittance_date ? formatDate(c.admittance_date) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                  {(expiredList ?? []).length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-gray-400">Žádné firmy</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Lent monthly chart */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-5">
@@ -316,46 +512,8 @@ export const Overview = () => {
         <LentChart data={lent} />
       </div>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 mb-5">
-
-        {/* Monthly invoices bar chart */}
-        <div className="xl:col-span-2 bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          <h2 className="text-sm font-semibold text-gray-700 mb-4">Fakturace po měsících — {year}</h2>
-          <BarChart
-            data={monthly.map(m => ({ label: MONTHS[m.month - 1], value: Number(m.total ?? 0) }))}
-            height={130}
-            color="#0a6b6b"
-            formatVal={v => `${Math.round(v / 1000)}k`}
-          />
-          <div className="mt-3 flex gap-6 text-xs text-gray-500">
-            <span>Celkem: <strong className="text-gray-700">{formatNumber(monthly.reduce((s, m) => s + Number(m.total ?? 0), 0))} Kč</strong></span>
-            <span>Faktur: <strong className="text-gray-700">{monthly.reduce((s, m) => s + (m.count ?? 0), 0)}</strong></span>
-          </div>
-        </div>
-
-        {/* Tariff distribution */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          <h2 className="text-sm font-semibold text-gray-700 mb-4">Firmy dle tarifu</h2>
-          {(overview?.companies_by_tariff ?? []).map((t: any) => (
-            <HBar key={t.tariff} label={t.name || t.tariff || '—'} value={t.count} max={tariffMax} sub="firem" />
-          ))}
-          <p className="text-xs text-gray-400 mt-2">Celkem: {totalCompanies} firem</p>
-        </div>
-      </div>
-
       {/* Bottom row */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
-
-        {/* New contracts by month */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
-          <h2 className="text-sm font-semibold text-gray-700 mb-4">Nové smlouvy — {year}</h2>
-          <BarChart
-            data={contracts.map(c => ({ label: MONTHS[c.month - 1], value: c.count }))}
-            height={90}
-            color="#0d9488"
-          />
-        </div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
 
         {/* Claims aging */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">

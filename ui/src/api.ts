@@ -71,6 +71,9 @@ export const getStatsInvoicesMonthly = (year?: number) =>
 export const getStatsContractsMonthly = (year?: number) =>
   get<any[]>(`/statistics/contracts-monthly${year ? `?year=${year}` : ''}`)
 export const getStatsClaims = () => get<any[]>('/statistics/claims')
+export const getStatsExpiredAccess = () => get<any[]>('/statistics/expired-access')
+export const getStatsOverdueCompanies = (region?: string) =>
+  get<any[]>(`/statistics/overdue-companies${region ? `?region=${encodeURIComponent(region)}` : ''}`)
 export const getStatsDiaryByOwner = () => get<any[]>('/statistics/diary-by-owner')
 export const getStatsLentMonthly = () => get<any[]>('/statistics/lent-monthly')
 export const getDiaryUpcoming = (initials: string) =>
@@ -99,6 +102,19 @@ export const upsertUserAccount = (id: string, body: Record<string, any>) => put<
 // invoices
 export const getInvoices = (id: string, offset = 0, limit = 10) =>
   get<{ total: number; data: any[] }>(`/companies/${id}/invoices?limit=${limit}&offset=${offset}`)
+export const getInvoiceDetail = (id: string) => get<any>(`/invoicing/${id}`)
+export const getInvoiceEmailContacts = (id: string) => get<string[]>(`/invoicing/${id}/email-contacts`)
+export const sendInvoiceEmail = (id: string, body: { to: string; cc?: string; subject: string; body: string }) =>
+  post<{ ok: boolean }>(`/invoicing/${id}/send-email`, body)
+export const settleInvoice = (id: string, date?: string) =>
+  put<{ success: boolean }>(`/invoicing/${id}/settle`, { date })
+export const cancelInvoice = (id: string) =>
+  put<{ success: boolean }>(`/invoicing/${id}/cancel`, {})
+export const downloadInvoicePdf = async (id: string): Promise<Blob> => {
+  const r = await fetch(buildUrl(`/invoicing/${id}/pdf`), { headers: h() })
+  if (!r.ok) throw new Error('PDF se nepodařilo vygenerovat')
+  return r.blob()
+}
 
 // vehicles
 export const getVehicles = (id: string) => get<any[]>(`/companies/${id}/vehicles`)
@@ -130,3 +146,16 @@ export const getOnlineLog = (id: string) => get<any[]>(`/companies/${id}/online-
 // diary
 export const getDiary = (companyKey: string) =>
   get<{ data: any[] }>(`/diary?company_key=${companyKey}&limit=100`)
+
+// ── SMS ───────────────────────────────────────────────────────────────────────
+
+export const getSmsContext = (companyKey: string) => get<any>(`/send-sms/context/${companyKey}`)
+export const sendSms = (body: {
+  company_key: number; to: string; text: string
+  send_immediately: boolean; note_type: string; note_text: string
+}) => post<{ success: boolean; sms_id: number }>('/send-sms/send', body)
+
+// ── Workers ───────────────────────────────────────────────────────────────────
+
+export const listWorkers = () => get<any[]>('/workers')
+export const getWorker = (initials: string) => get<any>(`/workers/${encodeURIComponent(initials)}`)

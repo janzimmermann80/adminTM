@@ -5,6 +5,8 @@ import { Overview } from './pages/Overview'
 import { Vyhledavani } from './pages/Vyhledavani'
 import { Search } from './pages/Search'
 import { CompanyDetail } from './pages/company/CompanyDetail'
+import { WorkerDetail } from './pages/WorkerDetail'
+import { InvoicePrint } from './pages/InvoicePrint'
 import { Spinner } from './components/Spinner'
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -24,6 +26,8 @@ const AppRoutes = () => (
     <Route path="/vyhledavani" element={<ProtectedRoute><Vyhledavani /></ProtectedRoute>} />
     <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
     <Route path="/company/:id" element={<ProtectedRoute><CompanyDetail /></ProtectedRoute>} />
+    <Route path="/worker/:initials" element={<ProtectedRoute><WorkerDetail /></ProtectedRoute>} />
+    <Route path="/invoicing/:id/print" element={<InvoicePrint />} />
     <Route path="/" element={<Navigate to="/overview" replace />} />
     <Route path="*" element={<Navigate to="/overview" replace />} />
   </Routes>
