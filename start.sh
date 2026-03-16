@@ -100,12 +100,164 @@ else:
     print('Patch SKIP: company_count pattern not found', file=sys.stderr)
 PYEOF
 
+# Patch: overview — přidej expiredGpsImport do Promise.all a expired_access_with_tracking do response
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/statistics.ts'
+src = open(f).read()
+old_active = "        // Nové smlouvy tento měsíc"
+new_active = """        // Aktivní firmy (admittance_date > dnes)
+        sql`
+          SELECT count(*)::int AS count
+          FROM provider.company_detail
+          WHERE admittance_date > CURRENT_DATE
+        `,
+        // Nové smlouvy tento měsíc"""
+old_vehicles = "        sql`\n          SELECT count(*)::int AS count\n          FROM gps.tracking_last\n          WHERE time >= NOW() - INTERVAL '7 days'\n        `.catch(() => [{ count: 0 }]),"
+new_vehicles = """        sql`
+          SELECT count(*)::int AS count
+          FROM gps.tracking_last
+          WHERE time >= NOW() - INTERVAL '7 days'
+        `.catch(() => [{ count: 0 }]),
+        // Firmy s GPS importem a prošlým přístupem
+        sql`
+          SELECT count(*)::int AS count
+          FROM gps.import_service I
+          LEFT JOIN provider.company_detail D ON I.company_key = D.company_key
+          WHERE D.admittance_date::date < NOW()
+        `.catch(() => [{ count: 0 }]),"""
+old_destructure = "      const [companies, contracts, invoices, claims, diary, vehicles] = await Promise.all(["
+new_destructure = "      const [companies, activeCompanies, contracts, invoices, claims, claimsByRegion, diary, vehicles, expiredGpsImport] = await Promise.all(["
+old_claims_diary = "        // Záznamy deníku dnes"
+new_claims_diary = """        // Pohledávky dle oblasti
+        sql`
+          SELECT trim(C.region) AS region,
+                 count(*)::int AS count,
+                 sum(I.total)::numeric AS total_sum
+          FROM provider.invoice I
+          JOIN provider.company C ON C.company_key = I.company_key
+          WHERE I.settlement IS NULL AND I.cancellation IS NULL
+            AND I.maturity < CURRENT_DATE - INTERVAL '14 days'
+            AND trim(C.region) IN ('001', '002', '003')
+          GROUP BY trim(C.region)
+          ORDER BY trim(C.region)
+        `,
+        // Záznamy deníku dnes"""
+old_response = "        active_vehicles: vehicles[0]?.count ?? 0,\n      })"
+old_response2 = "        companies_by_tariff: companies,\n        new_contracts_this_month:"
+new_response2 = "        companies_by_tariff: companies,\n        active_companies: activeCompanies[0]?.count ?? 0,\n        new_contracts_this_month:"
+old_response3 = "        overdue_claims: claims[0] ?? { count: 0, total_sum: 0 },"
+new_response3 = "        overdue_claims: claims[0] ?? { count: 0, total_sum: 0 },\n        overdue_claims_by_region: claimsByRegion,"
+new_response = "        active_vehicles: vehicles[0]?.count ?? 0,\n        expired_access_with_tracking: expiredGpsImport[0]?.count ?? 0,\n      })"
+changed = False
+if old_destructure in src:
+    src = src.replace(old_destructure, new_destructure); changed = True
+if old_active in src:
+    src = src.replace(old_active, new_active); changed = True
+if old_claims_diary in src:
+    src = src.replace(old_claims_diary, new_claims_diary); changed = True
+if old_vehicles in src:
+    src = src.replace(old_vehicles, new_vehicles); changed = True
+if old_response2 in src:
+    src = src.replace(old_response2, new_response2); changed = True
+if old_response3 in src:
+    src = src.replace(old_response3, new_response3); changed = True
+if old_response in src:
+    src = src.replace(old_response, new_response); changed = True
+if changed:
+    open(f, 'w').write(src)
+    print('Patch OK: overview claimsByRegion+expiredGpsImport', file=sys.stderr)
+else:
+    print('Patch SKIP: overview already patched or pattern not found', file=sys.stderr)
+PYEOF
+
+# Patch: expired-access endpoint v statistics.ts (správný SQL přes gps.import_service)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/statistics.ts'
+src = open(f).read()
+marker = "  // GET /api/statistics/invoices-monthly — tržby per měsíc (rok)"
+insert = """  // GET /api/statistics/expired-access — firmy s GPS importem a prošlým přístupem
+  app.get('/expired-access', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const rows = await sql`
+        SELECT I.company_key, I.comp_id, I.comp_name, I.usr, I.import_type,
+               D.admittance_date
+        FROM gps.import_service I
+        LEFT JOIN provider.company_detail D ON I.company_key = D.company_key
+        WHERE D.admittance_date::date < NOW()
+        ORDER BY I.comp_name
+      `.catch(() => [])
+      return reply.send(rows)
+    } finally {
+      await sql.end()
+    }
+  })
+
+"""
+if '/expired-access' not in src and marker in src:
+    open(f, 'w').write(src.replace(marker, insert + marker))
+    print('Patch OK: expired-access endpoint', file=sys.stderr)
+else:
+    print('Patch SKIP: expired-access already present or marker not found', file=sys.stderr)
+PYEOF
+
+# Patch: lent-monthly endpoint v statistics.ts
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/statistics.ts'
+src = open(f).read()
+marker = "  // GET /api/statistics/invoices-monthly — tržby per měsíc (rok)"
+insert = """  // GET /api/statistics/lent-monthly — registrace dle měsíců (posledních 36 měsíců)
+  app.get('/lent-monthly', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const rows = await sql`
+        SELECT to_char(date_trunc('month', prog_lent_date), 'YYYY-MM') AS month,
+               count(*)::int AS count
+        FROM provider.company_detail
+        WHERE prog_lent_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+          AND prog_lent_date IS NOT NULL
+        GROUP BY date_trunc('month', prog_lent_date)
+        ORDER BY month
+      `
+      const byMonth = {}
+      for (const r of rows) byMonth[r.month] = r.count
+      const result = []
+      for (let i = 35; i >= 0; i--) {
+        const d = new Date()
+        d.setDate(1)
+        d.setMonth(d.getMonth() - i)
+        const key = d.toISOString().slice(0, 7)
+        result.push({ month: key, count: byMonth[key] ?? 0 })
+      }
+      return reply.send(result)
+    } finally {
+      await sql.end()
+    }
+  })
+
+"""
+if '/lent-monthly' not in src and marker in src:
+    open(f, 'w').write(src.replace(marker, insert + marker))
+    print('Patch OK: lent-monthly endpoint', file=sys.stderr)
+else:
+    print('Patch SKIP: lent-monthly already present or marker not found', file=sys.stderr)
+PYEOF
+
 # Patch: overdue-companies endpoint v statistics.ts (s region filtrem)
 python3 - <<'PYEOF'
 import sys
 f = '/services/admin-data/patched/src/routes/statistics.ts'
 src = open(f).read()
-marker = "  // GET /api/statistics/expired-access — firmy s aktivními vozidly ale bez platného přístupu"
+marker = "  // GET /api/statistics/invoices-monthly — tržby per měsíc (rok)"
 insert = """  // GET /api/statistics/overdue-companies — firmy s pohledávkami po splatnosti
   app.get('/overdue-companies', {
     onRequest: [(app as any).authenticate],
@@ -124,7 +276,7 @@ insert = """  // GET /api/statistics/overdue-companies — firmy s pohledávkami
             JOIN provider.company C ON C.company_key = I.company_key
             LEFT JOIN provider.tariff T ON T.tariff = C.tariff
             WHERE I.settlement IS NULL AND I.cancellation IS NULL
-              AND I.maturity < CURRENT_DATE
+              AND I.maturity < CURRENT_DATE - INTERVAL '14 days'
               AND trim(C.region) = ${region}
             GROUP BY C.company_key, C.id, C.company, C.city, C.country, C.tariff, T.name
             ORDER BY total_sum DESC
@@ -138,7 +290,7 @@ insert = """  // GET /api/statistics/overdue-companies — firmy s pohledávkami
             JOIN provider.company C ON C.company_key = I.company_key
             LEFT JOIN provider.tariff T ON T.tariff = C.tariff
             WHERE I.settlement IS NULL AND I.cancellation IS NULL
-              AND I.maturity < CURRENT_DATE
+              AND I.maturity < CURRENT_DATE - INTERVAL '14 days'
             GROUP BY C.company_key, C.id, C.company, C.city, C.country, C.tariff, T.name
             ORDER BY total_sum DESC
           `
@@ -154,45 +306,6 @@ if '/overdue-companies' not in src and marker in src:
     print('Patch OK: overdue-companies endpoint', file=sys.stderr)
 else:
     print('Patch SKIP: overdue-companies already present or marker not found', file=sys.stderr)
-PYEOF
-
-# Patch: expired-access endpoint v statistics.ts
-python3 - <<'PYEOF'
-import sys
-f = '/services/admin-data/patched/src/routes/statistics.ts'
-src = open(f).read()
-marker = "  // GET /api/statistics/invoices-monthly — tržby per měsíc (rok)"
-insert = """  // GET /api/statistics/expired-access — firmy s aktivními vozidly ale bez platného přístupu
-  app.get('/expired-access', {
-    onRequest: [(app as any).authenticate],
-  }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userDb, passwordDb } = (request as any).user
-    const sql = getUserSql(userDb, passwordDb)
-    try {
-      const rows = await sql`
-        SELECT DISTINCT C.company_key, C.id, C.company, C.city, C.country,
-               C.tariff, T.name AS tariff_name, CD.admittance_date
-        FROM gps.tracking_last TL
-        JOIN gps.car_base CB ON CB.car_key = TL.car_key
-        JOIN provider.company C ON C.company_key = CB.company_key
-        JOIN provider.company_detail CD ON CD.company_key = C.company_key
-        LEFT JOIN provider.tariff T ON T.tariff = C.tariff
-        WHERE TL.time >= NOW() - INTERVAL '7 days'
-          AND (CD.admittance_date IS NULL OR CD.admittance_date <= CURRENT_DATE)
-        ORDER BY C.company
-      `.catch(() => [])
-      return reply.send(rows)
-    } finally {
-      await sql.end()
-    }
-  })
-
-"""
-if '/expired-access' not in src and marker in src:
-    open(f, 'w').write(src.replace(marker, insert + marker))
-    print('Patch OK: expired-access endpoint', file=sys.stderr)
-else:
-    print('Patch SKIP: expired-access already present or marker not found', file=sys.stderr)
 PYEOF
 
 # Patch: user_account PUT — nahraď ON CONFLICT za UPDATE+INSERT (tabulka nemá unikátní constraint)

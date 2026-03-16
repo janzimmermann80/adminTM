@@ -24,8 +24,7 @@ const AppRoutes = () => (
   <Routes>
     <Route path="/login" element={<Login />} />
     <Route path="/overview" element={<ProtectedRoute><Overview /></ProtectedRoute>} />
-    <Route path="/vyhledavani" element={<ProtectedRoute><Vyhledavani /></ProtectedRoute>} />
-    <Route path="/search" element={<ProtectedRoute><Search /></ProtectedRoute>} />
+    <Route path="/search" element={<ProtectedRoute><Vyhledavani /></ProtectedRoute>} />
     <Route path="/company/:id" element={<ProtectedRoute><CompanyDetail /></ProtectedRoute>} />
     <Route path="/worker/:initials" element={<ProtectedRoute><WorkerDetail /></ProtectedRoute>} />
     <Route path="/invoicing/:id/print" element={<InvoicePrint />} />

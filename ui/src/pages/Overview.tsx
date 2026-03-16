@@ -133,7 +133,7 @@ const OverdueTile = ({
         </svg>
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-0.5">Pohledávky po splatnosti</p>
+        <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-0.5">Pohledávky po splatnosti min. 14 dní</p>
         <p className="text-2xl font-bold text-gray-800 leading-none">{formatNumber(total)} Kč</p>
         <div className="flex items-center gap-2 mt-1 mb-2">
           <span className="text-xs text-gray-400">{count} faktur</span>
@@ -268,7 +268,7 @@ export const Overview = () => {
     )
   }
 
-  const totalCompanies = (overview?.companies_by_tariff ?? []).reduce((s: number, t: any) => s + (t.count ?? 0), 0)
+  const totalCompanies = overview?.active_companies ?? 0
   const totalOverdue = Number(overview?.overdue_claims?.total_sum ?? 0)
 
   return (
@@ -283,7 +283,7 @@ export const Overview = () => {
         <Tile
           label="Aktivní firmy"
           value={totalCompanies}
-          sub="celkem v systému"
+          sub="s platným přístupem"
           color="teal"
           icon={<svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}><path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>}
         />
@@ -449,7 +449,7 @@ export const Overview = () => {
       {showExpired && (
         <div className="bg-white rounded-xl border border-red-200 shadow-sm mb-5 overflow-hidden">
           <div className="px-5 py-3 border-b border-red-100 flex items-center justify-between bg-red-50">
-            <span className="text-sm font-semibold text-red-700">Firmy bez platného přístupu — aktivní vozidla (7 dní)</span>
+            <span className="text-sm font-semibold text-red-700">Firmy bez platného přístupu — aktivní GPS import</span>
             {expiredLoading
               ? <Spinner size={4} />
               : <span className="text-xs text-red-400">{expiredList?.length ?? 0} firem</span>
@@ -464,8 +464,8 @@ export const Overview = () => {
                   <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
                     <th className="px-4 py-3 font-medium">ID</th>
                     <th className="px-4 py-3 font-medium">Firma</th>
-                    <th className="px-4 py-3 font-medium hidden md:table-cell">Město</th>
-                    <th className="px-4 py-3 font-medium hidden lg:table-cell">Tarif</th>
+                    <th className="px-4 py-3 font-medium hidden md:table-cell">Uživatel</th>
+                    <th className="px-4 py-3 font-medium hidden lg:table-cell">Typ importu</th>
                     <th className="px-4 py-3 font-medium hidden lg:table-cell">Přístup do</th>
                   </tr>
                 </thead>
@@ -476,16 +476,10 @@ export const Overview = () => {
                       onClick={() => window.open(`#/company/${c.company_key}`, '_blank')}
                       className="hover:bg-red-50 cursor-pointer transition-colors"
                     >
-                      <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.id}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{c.company}</td>
-                      <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{c.city}</td>
-                      <td className="px-4 py-3 hidden lg:table-cell">
-                        {c.tariff_name ? (
-                          <span className="inline-flex items-center bg-teal-100 text-teal-700 rounded px-1.5 py-0.5 text-xs">{c.tariff_name}</span>
-                        ) : c.tariff ? (
-                          <span className="text-gray-400 text-xs">{c.tariff}</span>
-                        ) : null}
-                      </td>
+                      <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.comp_id}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">{c.comp_name}</td>
+                      <td className="px-4 py-3 text-gray-600 hidden md:table-cell text-xs">{c.usr}</td>
+                      <td className="px-4 py-3 hidden lg:table-cell text-xs text-gray-500">{c.import_type}</td>
                       <td className="px-4 py-3 hidden lg:table-cell text-xs text-red-500 font-medium">
                         {c.admittance_date ? formatDate(c.admittance_date) : '—'}
                       </td>
@@ -506,7 +500,7 @@ export const Overview = () => {
       {/* Lent monthly chart */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-gray-700">Registrace — počet dle měsíců (posledních 36 měsíců)</h2>
+          <h2 className="text-sm font-semibold text-gray-700">Registrace za posledních 36 měsíců</h2>
           <span className="text-xs text-gray-400">{lent.reduce((s, m) => s + m.count, 0)} celkem</span>
         </div>
         <LentChart data={lent} />

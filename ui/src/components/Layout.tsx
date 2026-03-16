@@ -96,8 +96,7 @@ const IconLogout = () => (
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/overview',          label: 'Přehled',         icon: <IconDashboard /> },
-  { to: '/vyhledavani',       label: 'Vyhledávání',     icon: <IconSearch /> },
-  { to: '/search',            label: 'Firmy',           icon: <IconCompanies /> },
+  { to: '/search',            label: 'Hledání',         icon: <IconSearch /> },
   { label: 'Fakturace',       icon: <IconInvoice />,    disabled: true },
   { label: 'Nabídky',         icon: <IconOffer />,      disabled: true },
   { label: 'Deník',           icon: <IconDiary />,      disabled: true },
