@@ -110,6 +110,8 @@ export const settleInvoice = (id: string, date?: string) =>
   put<{ success: boolean }>(`/invoicing/${id}/settle`, { date })
 export const cancelInvoice = (id: string) =>
   put<{ success: boolean }>(`/invoicing/${id}/cancel`, {})
+export const deleteInvoice = (id: string) =>
+  del<{ success: boolean }>(`/invoicing/${id}`)
 export const downloadInvoicePdf = async (id: string): Promise<Blob> => {
   const r = await fetch(buildUrl(`/invoicing/${id}/pdf`), { headers: h() })
   if (!r.ok) throw new Error('PDF se nepodařilo vygenerovat')
@@ -154,6 +156,16 @@ export const sendSms = (body: {
   company_key: number; to: string; text: string
   send_immediately: boolean; note_type: string; note_text: string
 }) => post<{ success: boolean; sms_id: number }>('/send-sms/send', body)
+
+export const getMailContext = (companyKey: string) => get<any>(`/send-mail/context/${companyKey}`)
+export const sendMail = (body: {
+  company_key: number; to: string; sender: string
+  subject: string; message: string
+  bcc?: boolean; bcc_email?: string
+  note_type: string; note_text: string
+}) => post<{ success: boolean }>('/send-mail/send', body)
+export const getEmailTemplates = () => get<any[]>('/send-mail/templates')
+export const saveEmailTemplates = (templates: any[]) => put<{ success: boolean }>('/send-mail/templates', templates)
 
 // ── Workers ───────────────────────────────────────────────────────────────────
 

@@ -6,45 +6,45 @@ import type { Note } from '../../types'
 
 interface Props { companyKey: string }
 
-const NOTE_TYPES = ['0','1','2','3','4','5','6','7','8','9','10','11','12','13','14','15','16','17','18','19','20','21','22','23','24','25']
+const NOTE_TYPES = ['0','M','S','K','P','N','V','?','X','H','!','Z','W','G','U','C','D','J','I','$','O','R','#','A','B','Q']
 const NOTE_TYPE_LABELS: Record<string, string> = {
-  '0':  '- žádný',
-  '1':  'M materiály zaslány',
-  '2':  'S smlouva přišla',
-  '3':  'K konec spolupráce',
-  '4':  'P pohledávky jsou vymáhány',
-  '5':  'N nabídka spolupráce',
-  '6':  'V verze programu - stará',
-  '7':  '? rozhodují se/budou pokračovat?',
-  '8':  'X nemají zájem',
-  '9':  'H hotline',
-  '10': '! podepíší smlouvu',
-  '11': 'Z záznamy žádali telefonicky',
-  '12': 'W zaslán program, sděleno číslo',
-  '13': 'G zaslán upgrade',
-  '14': 'U zaslána upomínka',
-  '15': 'C proč se nepřipojují?',
-  '16': 'D discount - nabídka slevy',
-  '17': 'J jak se Vám daří?',
-  '18': 'I instalace programu osobní',
-  '19': '$ nová smlouva FAXem',
-  '20': 'O ostatní',
-  '21': 'R rádi by spolupracovali',
-  '22': '# není originál smlouvy',
-  '23': 'A není aktivní',
-  '24': 'B bez upgrade',
-  '25': 'Q interní - mimo premium',
+  '0': '- žádný',
+  'M': 'M materiály zaslány',
+  'S': 'S smlouva přišla',
+  'K': 'K konec spolupráce',
+  'P': 'P pohledávky jsou vymáhány',
+  'N': 'N nabídka spolupráce',
+  'V': 'V verze programu - stará',
+  '?': '? rozhodují se/budou pokračovat?',
+  'X': 'X nemají zájem',
+  'H': 'H hotline',
+  '!': '! podepíší smlouvu',
+  'Z': 'Z záznamy žádali telefonicky',
+  'W': 'W zaslán program, sděleno číslo',
+  'G': 'G zaslán upgrade',
+  'U': 'U zaslána upomínka',
+  'C': 'C proč se nepřipojují?',
+  'D': 'D discount - nabídka slevy',
+  'J': 'J jak se Vám daří?',
+  'I': 'I instalace programu osobní',
+  '$': '$ nová smlouva FAXem',
+  'O': 'O ostatní',
+  'R': 'R rádi by spolupracovali',
+  '#': '# není originál smlouvy',
+  'A': 'A není aktivní',
+  'B': 'B bez upgrade',
+  'Q': 'Q interní - mimo premium',
 }
 const NOTE_TYPE_COLORS: Record<string, string> = {
-  '3':  'bg-red-100 text-red-700',
-  '4':  'bg-red-100 text-red-700',
-  '8':  'bg-red-100 text-red-700',
-  '10': 'bg-green-100 text-green-700',
-  '21': 'bg-green-100 text-green-700',
-  '2':  'bg-teal-100 text-[#0a6b6b]',
-  '5':  'bg-teal-100 text-[#0a6b6b]',
-  '9':  'bg-purple-100 text-purple-700',
-  '14': 'bg-yellow-100 text-yellow-700',
+  'K': 'bg-red-100 text-red-700',
+  'P': 'bg-red-100 text-red-700',
+  'X': 'bg-red-100 text-red-700',
+  '!': 'bg-green-100 text-green-700',
+  'R': 'bg-green-100 text-green-700',
+  'S': 'bg-teal-100 text-[#0a6b6b]',
+  'N': 'bg-teal-100 text-[#0a6b6b]',
+  'H': 'bg-purple-100 text-purple-700',
+  'U': 'bg-yellow-100 text-yellow-700',
 }
 
 export const TabNotes = ({ companyKey }: Props) => {
@@ -205,7 +205,7 @@ export const TabNotes = ({ companyKey }: Props) => {
                       <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{formatDate(note.creation_date)}</td>
                       <td className="px-4 py-3">
                         <span className={`text-xs rounded-full px-2 py-0.5 font-medium ${typeCls}`}>
-                          {NOTE_TYPE_LABELS[note.type] ?? note.type}
+                          {note.type === '0' ? '—' : note.type}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-700 whitespace-pre-wrap leading-relaxed">{note.text}</td>

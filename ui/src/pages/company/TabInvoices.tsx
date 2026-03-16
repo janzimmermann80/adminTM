@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   getInvoices, getInvoiceEmailContacts, sendInvoiceEmail,
-  settleInvoice, cancelInvoice, downloadInvoicePdf,
+  settleInvoice, cancelInvoice, deleteInvoice, downloadInvoicePdf,
 } from '../../api'
 import { Spinner } from '../../components/Spinner'
 import { Pagination } from '../../components/Pagination'
@@ -208,6 +208,7 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
   const [cancelling, setCancelling] = useState<number | null>(null)
+  const [deleting, setDeleting] = useState<number | null>(null)
   const [printing,   setPrinting]   = useState<number | null>(null)
 
   const [emailTarget, setEmailTarget] = useState<Invoice | null>(null)
@@ -235,6 +236,16 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
       load(offset)
     } catch (e: any) { alert(e.message) }
     finally { setCancelling(null) }
+  }
+
+  const handleDelete = async (inv: Invoice) => {
+    if (!confirm(`Smazat fakturu ${invoiceVs(inv)}? Tato akce je nevratná.`)) return
+    setDeleting(inv.invoice_key)
+    try {
+      await deleteInvoice(String(inv.invoice_key))
+      load(offset)
+    } catch (e: any) { alert(e.message) }
+    finally { setDeleting(null) }
   }
 
   const handlePrint = async (inv: Invoice) => {
@@ -354,14 +365,24 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
                       {!isCancelled && (
                         <button title="Stornovat fakturu" onClick={() => handleCancel(inv)}
                           disabled={cancelling === inv.invoice_key}
-                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40">
+                          className="p-1.5 rounded-lg text-gray-400 hover:text-orange-500 hover:bg-orange-50 transition-colors disabled:opacity-40">
                           {cancelling === inv.invoice_key ? <Spinner size={4}/> : (
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/>
                             </svg>
                           )}
                         </button>
                       )}
+                      {/* Smazat */}
+                      <button title="Smazat fakturu" onClick={() => handleDelete(inv)}
+                        disabled={deleting === inv.invoice_key}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40">
+                        {deleting === inv.invoice_key ? <Spinner size={4}/> : (
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                          </svg>
+                        )}
+                      </button>
                     </div>
                   </td>
                 </tr>

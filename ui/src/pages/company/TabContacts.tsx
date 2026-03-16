@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react'
 import { getContacts, addPerson, updatePerson, deletePerson, addContact, updateContact, deleteContact, upsertUserAccount } from '../../api'
 import { Spinner } from '../../components/Spinner'
 import { SendSmsModal } from '../../components/SendSmsModal'
+import { SendEmailModal } from '../../components/SendEmailModal'
 import type { ContactPerson, Contact } from '../../types'
 import { CONTACT_TYPE_LABELS } from '../../types'
 
-interface Props { companyKey: string }
+interface Props { companyKey: string; companyId?: string }
 
 interface RowEdit {
   name: string
@@ -19,7 +20,11 @@ interface RowEdit {
   password: string
 }
 
-export const TabContacts = ({ companyKey }: Props) => {
+const IMPERSONATE_BASE = 'https://admin.euro-sped.cz/company-details/login-truckmanager-eu.php'
+const impersonateUrl = (type: string, username: string) =>
+  `${IMPERSONATE_BASE}?type=${type}&username=${encodeURIComponent(username)}`
+
+export const TabContacts = ({ companyKey, companyId }: Props) => {
   const [persons, setPersons] = useState<ContactPerson[]>([])
   const [contacts, setContacts] = useState<Contact[]>([])
   const [userAccounts, setUserAccounts] = useState<any[]>([])
@@ -34,6 +39,7 @@ export const TabContacts = ({ companyKey }: Props) => {
   const [editData, setEditData] = useState<RowEdit | null>(null)
 
   const [smsTarget, setSmsTarget] = useState<{ gsm: string; name: string } | null>(null)
+  const [emailTarget, setEmailTarget] = useState<string | null>(null)
 
   const [addContactFor, setAddContactFor] = useState<number | null>(null)
   const [newContact, setNewContact] = useState({ type: 'U', value: '' })
@@ -281,11 +287,35 @@ export const TabContacts = ({ companyKey }: Props) => {
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="flex flex-col gap-0.5">
-                        {emails.map(c => <span key={c.contact_key} className="text-gray-800">{c.value}</span>)}
+                        {emails.map(c => (
+                          <div key={c.contact_key} className="flex items-center gap-1.5">
+                            <span className="text-gray-800">{c.value}</span>
+                            <button title="Odeslat e-mail"
+                              onClick={e => { e.stopPropagation(); setEmailTarget(c.value) }}
+                              className="text-gray-300 hover:text-blue-600 transition-colors">
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                              </svg>
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     </td>
                     <td className="px-3 py-2.5">
-                      <span className="font-mono text-gray-800 text-xs">{account?.username ?? ''}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono text-gray-800 text-xs">{account?.username ?? ''}</span>
+                        {account?.username && (
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {(['app','devel'] as const).map(type => (
+                              <a key={type} href={impersonateUrl(type, account.username)} target="_blank" rel="noreferrer"
+                                title={`Impersonace ${type === 'devel' ? 'app2' : type}`}
+                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-500 transition-colors">
+                                {type === 'devel' ? 'app2' : type}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5">
                       <span className="font-mono text-gray-500 text-xs">{account?.password ?? ''}</span>
@@ -310,7 +340,20 @@ export const TabContacts = ({ companyKey }: Props) => {
                 <td className="px-3 py-2.5 text-gray-300 italic text-sm">—</td>
                 <td className="px-3 py-2.5"></td>
                 <td className="px-3 py-2.5"></td>
-                <td className="px-3 py-2.5"><span className="font-mono text-gray-800 text-xs">{acc.username}</span></td>
+                <td className="px-3 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-gray-800 text-xs">{acc.username}</span>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {(['app','devel'] as const).map(type => (
+                        <a key={type} href={impersonateUrl(type, acc.username)} target="_blank" rel="noreferrer"
+                          title={`Impersonace ${type}`}
+                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-500 transition-colors">
+                          {type}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                </td>
                 <td className="px-3 py-2.5"><span className="font-mono text-gray-500 text-xs">{acc.password}</span></td>
                 <td className="px-3 py-2.5"></td>
               </tr>
@@ -356,6 +399,14 @@ export const TabContacts = ({ companyKey }: Props) => {
           </div>
         )}
       </div>
+
+      {emailTarget !== null && (
+        <SendEmailModal
+          companyKey={companyKey}
+          initialEmail={emailTarget}
+          onClose={() => setEmailTarget(null)}
+        />
+      )}
 
       {smsTarget && (
         <SendSmsModal

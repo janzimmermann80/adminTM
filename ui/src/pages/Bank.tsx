@@ -324,7 +324,9 @@ export const Bank = () => {
   const [matchTarget, setMatchTarget] = useState<any | null>(null)
   const [statementsKey, setStatementsKey] = useState(0)
 
-  const handleUpload = async (files: FileList | null) => {
+  const [dragOver, setDragOver] = useState(false)
+
+  const handleUpload = async (files: FileList | File[] | null) => {
     if (!files?.length) return
     setUploading(true); setUploadResult(null); setUploadError('')
     try {
@@ -333,6 +335,13 @@ export const Bank = () => {
       if (res.imported > 0) setStatementsKey(k => k + 1)
     } catch (e: any) { setUploadError(e.message) }
     finally { setUploading(false) }
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation(); setDragOver(false)
+    const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith('.xml'))
+    if (files.length) handleUpload(files)
+    else setUploadError('Žádný XML soubor nebyl nalezen.')
   }
 
   const handleUnmatch = async (txId: number) => {
@@ -347,10 +356,22 @@ export const Bank = () => {
       </div>
 
       {/* Upload */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm px-5 py-4 mb-5">
-        <div className="flex flex-wrap items-center gap-3">
-          <input ref={fileRef} type="file" accept=".xml" multiple className="hidden"
-            onChange={e => handleUpload(e.target.files)} />
+      <div
+        className={`bg-white rounded-xl border-2 shadow-sm px-5 py-6 mb-5 transition-colors ${dragOver ? 'border-[#0a6b6b] bg-teal-50' : 'border-dashed border-gray-300'}`}
+        onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }}
+        onDragEnter={e => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }}
+        onDragLeave={e => { e.preventDefault(); e.stopPropagation(); setDragOver(false) }}
+        onDrop={handleDrop}
+      >
+        <input ref={fileRef} type="file" accept=".xml" multiple className="hidden"
+          onChange={e => handleUpload(e.target.files)} />
+        <div className="flex flex-col items-center gap-3 text-center">
+          <svg className={`w-8 h-8 ${dragOver ? 'text-[#0a6b6b]' : 'text-gray-400'} transition-colors`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+          </svg>
+          <div className="text-sm text-gray-500">
+            Přetáhněte soubory XML sem, nebo
+          </div>
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
@@ -361,19 +382,20 @@ export const Bank = () => {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
               </svg>
             )}
-            Nahrát FINSTA / CAMT.053 XML
+            Vybrat soubory
           </button>
-          {uploadResult && (
-            <div className="text-sm">
-              <span className="text-green-600 font-medium">Importováno: {uploadResult.imported}</span>
-              {uploadResult.skipped > 0 && <span className="ml-3 text-gray-500">Přeskočeno: {uploadResult.skipped}</span>}
-              {uploadResult.errors.length > 0 && (
-                <span className="ml-3 text-red-500">{uploadResult.errors.join('; ')}</span>
-              )}
-            </div>
-          )}
-          {uploadError && <span className="text-sm text-red-500">{uploadError}</span>}
+          <div className="text-xs text-gray-400">FINSTA / CAMT.053 XML</div>
         </div>
+        {(uploadResult || uploadError) && (
+          <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap justify-center gap-3 text-sm">
+            {uploadResult && <>
+              <span className="text-green-600 font-medium">Importováno: {uploadResult.imported}</span>
+              {uploadResult.skipped > 0 && <span className="text-gray-500">Přeskočeno: {uploadResult.skipped}</span>}
+              {uploadResult.errors.length > 0 && <span className="text-red-500">{uploadResult.errors.join('; ')}</span>}
+            </>}
+            {uploadError && <span className="text-red-500">{uploadError}</span>}
+          </div>
+        )}
       </div>
 
       {/* Výpisy */}

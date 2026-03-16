@@ -195,6 +195,44 @@ else:
     print('Patch SKIP: expired-access already present or marker not found', file=sys.stderr)
 PYEOF
 
+# Patch: user_account PUT — nahraď ON CONFLICT za UPDATE+INSERT (tabulka nemá unikátní constraint)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+old = """      } else {
+        await sql`
+          INSERT INTO ${sql(employeeSchema + '.user_account')} (company_key, username, password)
+          VALUES (${id}, ${username}, ${password})
+          ON CONFLICT (company_key, username) DO UPDATE SET password = ${password}
+        `
+      }"""
+new = """      } else {
+        const existing = await sql`
+          SELECT 1 FROM ONLY ${sql(employeeSchema + '.user_account')}
+          WHERE company_key = ${id} AND username = ${username}
+          LIMIT 1
+        `
+        if (existing.length > 0) {
+          await sql`
+            UPDATE ONLY ${sql(employeeSchema + '.user_account')}
+            SET password = ${password}
+            WHERE company_key = ${id} AND username = ${username}
+          `
+        } else {
+          await sql`
+            INSERT INTO ${sql(employeeSchema + '.user_account')} (company_key, username, password)
+            VALUES (${id}, ${username}, ${password})
+          `
+        }
+      }"""
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: user_account no ON CONFLICT', file=sys.stderr)
+else:
+    print('Patch SKIP: user_account ON CONFLICT already fixed', file=sys.stderr)
+PYEOF
+
 # Patch: user_account SELECT * pro person_key
 python3 - <<'PYEOF'
 import sys
@@ -276,6 +314,45 @@ if 'workersRoutes' not in src:
     print('Patch OK: workers route', file=sys.stderr)
 else:
     print('Patch SKIP: workers route already present', file=sys.stderr)
+PYEOF
+
+# Patch: sendSms — nahraď send_sms_by_o2 voláním SMSbrána API
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/sendSms.ts'
+src = open(f).read()
+old = "        const [r] = await sql`SELECT public.send_sms_by_o2(${body.to}, ${smsText}) AS sms_id`\n        smsId = r.sms_id"
+new = """        const smsLogin = process.env.SMS_BRANA_LOGIN ?? ''
+        const smsPass = process.env.SMS_BRANA_PASSWORD ?? ''
+        const { createHash } = await import('crypto')
+        const now = new Date()
+        const pad = (n: number) => String(n).padStart(2, '0')
+        const time = `${now.getUTCFullYear()}${pad(now.getUTCMonth()+1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`
+        const salt = Math.random().toString(36).slice(2, 10)
+        const auth = createHash('md5').update(smsPass + time + salt).digest('hex')
+        const params = new URLSearchParams({
+          login: smsLogin,
+          time,
+          salt,
+          auth,
+          action: 'send_sms',
+          number: body.to,
+          message: smsText,
+        })
+        const resp = await fetch(`https://api.smsbrana.cz/smsconnect/http.php?${params}`)
+        const xml = await resp.text()
+        const errMatch = xml.match(/<err>(\\d+)<\\/err>/)
+        const idMatch = xml.match(/<sms_id>(\\d+)<\\/sms_id>/)
+        const errCode = errMatch ? Number(errMatch[1]) : 1
+        if (errCode !== 0) {
+          return reply.code(500).send({ error: `SMS brána vrátila chybu: err=${errCode}` })
+        }
+        smsId = idMatch ? Number(idMatch[1]) : 1"""
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: sendSms SMSbrana API', file=sys.stderr)
+else:
+    print('Patch SKIP: sendSms SMSbrana already patched', file=sys.stderr)
 PYEOF
 
 # Patch: sendSms + sendMail — I.id neexistuje v invoice tabulce, použij company?.id / C.id
@@ -605,6 +682,176 @@ if old4 in src:
     print('Patch OK: bank.ts invoices-search series filter', file=sys.stderr)
 
 open(f, 'w').write(src)
+PYEOF
+
+# Patch: companies/index.ts — services UPDATE bez COALESCE, aby bylo možné mazat hodnoty
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+old = """      await sql`
+        UPDATE provider.company_detail SET
+          contract                    = COALESCE(${body.contract ?? null}, contract),
+          contract_date               = COALESCE(${body.contract_date ?? null}::date, contract_date),
+          prog_sent                   = COALESCE(${body.prog_sent ?? null}, prog_sent),
+          prog_sent_date              = COALESCE(${body.prog_sent_date ?? null}::date, prog_sent_date),
+          prog_lent                   = COALESCE(${body.prog_lent ?? null}, prog_lent),
+          prog_lent_date              = COALESCE(${body.prog_lent_date ?? null}::date, prog_lent_date),
+          admittance                  = COALESCE(${body.admittance ?? null}, admittance),
+          admittance_date             = COALESCE(${body.admittance_date ?? null}::date, admittance_date),
+          forwarding                  = COALESCE(${body.forwarding ?? null}, forwarding),
+          forwarding_date             = COALESCE(${body.forwarding_date ?? null}::date, forwarding_date),
+          car_pool                    = COALESCE(${body.car_pool ?? null}, car_pool),
+          car_pool_date               = COALESCE(${body.car_pool_date ?? null}::date, car_pool_date),
+          claim_exchange              = COALESCE(${body.claim_exchange ?? null}, claim_exchange),
+          credit_tip_sms              = COALESCE(${body.credit_tip_sms ?? null}, credit_tip_sms),
+          advert_discount             = COALESCE(${body.advert_discount ?? null}, advert_discount),
+          send_emails_from_their_domain = COALESCE(${body.send_emails_from_their_domain ?? null}, send_emails_from_their_domain)
+        WHERE company_key = ${id}
+      `"""
+new = """      await sql`
+        UPDATE provider.company_detail SET
+          contract                    = ${body.contract ?? null},
+          contract_date               = ${body.contract_date ?? null}::date,
+          prog_sent                   = ${body.prog_sent ?? null},
+          prog_sent_date              = ${body.prog_sent_date ?? null}::date,
+          prog_lent                   = ${body.prog_lent ?? null},
+          prog_lent_date              = ${body.prog_lent_date ?? null}::date,
+          admittance                  = ${body.admittance ?? null},
+          admittance_date             = ${body.admittance_date ?? null}::date,
+          forwarding                  = ${body.forwarding ?? null},
+          forwarding_date             = ${body.forwarding_date ?? null}::date,
+          car_pool                    = ${body.car_pool ?? null},
+          car_pool_date               = ${body.car_pool_date ?? null}::date,
+          claim_exchange              = ${body.claim_exchange ?? null},
+          credit_tip_sms              = ${body.credit_tip_sms ?? null},
+          advert_discount             = ${body.advert_discount ?? null},
+          send_emails_from_their_domain = ${body.send_emails_from_their_domain ?? null}
+        WHERE company_key = ${id}
+      `"""
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: services UPDATE no COALESCE', file=sys.stderr)
+else:
+    print('Patch SKIP: services UPDATE already patched', file=sys.stderr)
+PYEOF
+
+# Patch: sendMail.ts — destrukturuj smtpUser/smtpPass v POST /send handleru
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/sendMail.ts'
+src = open(f).read()
+old = "    const { userDb, passwordDb, initials, employeeSchema } = (request as any).user\n    const sql = getUserSql(userDb, passwordDb)\n    const schema = employeeSchema || 'provider'\n    const body = request.body as {"
+new = "    const { userDb, passwordDb, initials, employeeSchema, smtpUser, smtpPass } = (request as any).user\n    const sql = getUserSql(userDb, passwordDb)\n    const schema = employeeSchema || 'provider'\n    const body = request.body as {"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: sendMail smtpUser/smtpPass destructure', file=sys.stderr)
+else:
+    print('Patch SKIP: sendMail smtpUser/smtpPass already destructured', file=sys.stderr)
+PYEOF
+
+# Patch: sendMail.ts — přidej GET/PUT /templates endpoint (ukládá do /home/dev/email_templates.json)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/sendMail.ts'
+src = open(f).read()
+marker = "  // POST /api/send-mail/send"
+new_code = """  // GET /api/send-mail/templates
+  app.get('/templates', {
+    onRequest: [(app as any).authenticate],
+  }, async (_request: FastifyRequest, reply: FastifyReply) => {
+    const fs = await import('fs/promises')
+    const path = '/home/dev/email_templates.json'
+    try {
+      const data = await fs.readFile(path, 'utf-8')
+      return reply.send(JSON.parse(data))
+    } catch {
+      return reply.send([])
+    }
+  })
+
+  // PUT /api/send-mail/templates
+  app.put('/templates', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const fs = await import('fs/promises')
+    const path = '/home/dev/email_templates.json'
+    const body = request.body as any[]
+    await fs.writeFile(path, JSON.stringify(body, null, 2), 'utf-8')
+    return reply.send({ success: true })
+  })
+
+  """
+if marker in src and "GET /api/send-mail/templates" not in src:
+    open(f, 'w').write(src.replace(marker, new_code + marker))
+    print('Patch OK: sendMail templates endpoints', file=sys.stderr)
+else:
+    print('Patch SKIP: sendMail templates already present', file=sys.stderr)
+PYEOF
+
+# Patch: invoicing.ts — přidej DELETE endpoint pro smazání faktury
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/invoicing.ts'
+src = open(f).read()
+marker = "  // PUT /api/invoicing/:id/cancel — storno faktury"
+new_endpoint = """  // DELETE /api/invoicing/:id — smazání faktury
+  app.delete('/:id', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    try {
+      await sql`DELETE FROM provider.invoice WHERE invoice_key = ${id}`
+      return reply.send({ success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  """
+if marker in src and "app.delete('/:id'" not in src:
+    open(f, 'w').write(src.replace(marker, new_endpoint + marker))
+    print('Patch OK: invoicing DELETE endpoint', file=sys.stderr)
+else:
+    print('Patch SKIP: invoicing DELETE already present', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — přidej statement_id filtr do /transactions endpointu
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+old = "    const q = request.query as {\n      unmatched?: string\n      credit_debit?: string\n      date_from?: string\n      date_to?: string\n      vs?: string\n      limit?: string\n      offset?: string\n    }"
+new = "    const q = request.query as {\n      unmatched?: string\n      statement_id?: string\n      credit_debit?: string\n      date_from?: string\n      date_to?: string\n      vs?: string\n      limit?: string\n      offset?: string\n    }"
+if old in src:
+    src = src.replace(old, new)
+    old2 = "      if (q.unmatched === 'true') { sql += ' AND t.matched_invoice_id IS NULL' }"
+    new2 = "      if (q.unmatched === 'true') { sql += ' AND t.matched_invoice_id IS NULL' }\n      if (q.statement_id)   { sql += ' AND t.statement_id = ?'; params.push(Number(q.statement_id)) }"
+    src = src.replace(old2, new2)
+    open(f, 'w').write(src)
+    print('Patch OK: bank.ts statement_id filter', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts statement_id filter already patched', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — přidej invoice_settlement do odpovědi /transactions
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+old = "          SELECT i.invoice_key, i.number, i.year, i.total, c.company\n          FROM provider.invoice i\n          LEFT JOIN provider.company c ON i.company_key = c.company_key\n          WHERE i.invoice_key = ANY(${matchedIds})"
+new = "          SELECT i.invoice_key, i.number, i.year, i.total, i.settlement, c.company\n          FROM provider.invoice i\n          LEFT JOIN provider.company c ON i.company_key = c.company_key\n          WHERE i.invoice_key = ANY(${matchedIds})"
+if old in src:
+    src = src.replace(old, new)
+    old2 = "        invoice_company: invoiceMap[t.matched_invoice_id]?.company ?? null,"
+    new2 = "        invoice_company:    invoiceMap[t.matched_invoice_id]?.company ?? null,\n        invoice_settlement: invoiceMap[t.matched_invoice_id]?.settlement ?? null,"
+    src = src.replace(old2, new2)
+    open(f, 'w').write(src)
+    print('Patch OK: bank.ts invoice_settlement', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts invoice_settlement already patched', file=sys.stderr)
 PYEOF
 
 # Spusť backend z patchované kopie

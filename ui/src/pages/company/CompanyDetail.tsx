@@ -10,6 +10,7 @@ import { TabContacts } from './TabContacts'
 import { TabInvoices } from './TabInvoices'
 import { TabVehicles } from './TabVehicles'
 import { TabNotes } from './TabNotes'
+import { TabOnline } from './TabOnline'
 
 const TABS = [
   { key: 'info', label: 'Základní info' },
@@ -17,6 +18,7 @@ const TABS = [
   { key: 'invoices', label: 'Faktury' },
   { key: 'vehicles', label: 'TruckManager' },
   { key: 'notes', label: 'Poznámky' },
+  { key: 'online', label: 'Online' },
 ]
 
 export const CompanyDetail = () => {
@@ -126,10 +128,11 @@ export const CompanyDetail = () => {
 
         <div className="p-5">
           {tab === 'info'     && <TabInfo     company={company} onReload={reload} />}
-          {tab === 'contacts' && <TabContacts companyKey={String(id)} />}
+          {tab === 'contacts' && <TabContacts companyKey={String(id)} companyId={String(company?.id ?? '')} />}
           {tab === 'invoices' && <TabInvoices companyKey={String(id)} companyId={String(company?.id ?? '')} />}
           {tab === 'vehicles' && <TabVehicles companyKey={String(id)} />}
           {tab === 'notes'    && <TabNotes    companyKey={String(id)} />}
+          {tab === 'online'   && <TabOnline   companyKey={String(id)} />}
         </div>
       </div>
     </Layout>

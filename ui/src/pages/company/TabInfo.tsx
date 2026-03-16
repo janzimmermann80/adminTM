@@ -159,9 +159,9 @@ export const TabInfo = ({ company, onReload }: Props) => {
     setSaving(true); setError('')
     try {
       const body: Record<string, any> = { ...svc }
-      // empty strings → null for dates
-      for (const k of ['contract_date','prog_sent_date','prog_lent_date','admittance_date','forwarding_date','car_pool_date']) {
-        if (!body[k]) body[k] = null
+      // empty strings → null for all fields
+      for (const k of Object.keys(body)) {
+        if (body[k] === '') body[k] = null
       }
       await updateServices(String(company.company_key), body)
       setEditServices(false)
