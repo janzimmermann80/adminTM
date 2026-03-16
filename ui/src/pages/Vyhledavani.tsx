@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/Spinner'
 import { Pagination } from '../components/Pagination'
+import { CompanyDetailModal } from '../components/CompanyDetailModal'
 import { search, getSearchMeta } from '../api'
 import { formatDate } from '../utils'
 import type { SearchMeta } from '../types'
@@ -94,8 +94,8 @@ const RadioPair = ({
 // ── main component ────────────────────────────────────────────────────────────
 
 export const Vyhledavani = () => {
-  const navigate = useNavigate()
   const [meta, setMeta] = useState<SearchMeta>({ tariffs: [], branches: [] })
+  const [modalKey, setModalKey] = useState<string | null>(null)
   const [text, setText] = useState<TextForm>(emptyText())
   const [filter, setFilter] = useState<FilterForm>(emptyFilter())
   const [results, setResults] = useState<any[]>([])
@@ -402,10 +402,18 @@ export const Vyhledavani = () => {
               <tbody className="divide-y divide-gray-100">
                 {results.map(c => (
                   <tr key={c.company_key}
-                    onClick={() => window.open(`#/company/${c.company_key}`, '_blank')}
+                    onClick={() => setModalKey(c.company_key)}
                     className="hover:bg-teal-50 cursor-pointer transition-colors">
                     <td className="px-3 py-2 font-mono text-xs text-gray-500">{c.id}</td>
-                    <td className="px-3 py-2 font-medium text-gray-900">{c.company}</td>
+                    <td className="px-3 py-2 font-medium text-gray-900">
+                      <a
+                        href={`#/company/${c.company_key}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="hover:text-[#0a6b6b] hover:underline"
+                      >{c.company}</a>
+                    </td>
                     <td className="px-3 py-2 text-gray-500 hidden lg:table-cell">{c.street}</td>
                     <td className="px-3 py-2 text-gray-500 hidden xl:table-cell font-mono text-xs">{c.zip}</td>
                     <td className="px-3 py-2 text-gray-600">{c.city}</td>
@@ -436,6 +444,13 @@ export const Vyhledavani = () => {
             </div>
           )}
         </div>
+      )}
+
+      {modalKey && (
+        <CompanyDetailModal
+          companyKey={modalKey}
+          onClose={() => setModalKey(null)}
+        />
       )}
     </Layout>
   )

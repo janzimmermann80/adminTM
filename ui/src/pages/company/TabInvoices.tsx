@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   getInvoices, getInvoiceEmailContacts, sendInvoiceEmail,
+  getMailContext,
   settleInvoice, cancelInvoice, deleteInvoice, downloadInvoicePdf,
 } from '../../api'
 import { Spinner } from '../../components/Spinner'
@@ -14,19 +15,22 @@ interface Props { companyKey: string; companyId?: string }
 const LIMIT = 10
 
 // ── Email modal ──────────────────────────────────────────────────────────────
-function InvoiceEmailModal({ inv, companyId, onClose, onSent }: {
+function InvoiceEmailModal({ inv, companyId, companyKey, onClose, onSent }: {
   inv: Invoice
   companyId: string
+  companyKey: string
   onClose: () => void
   onSent: () => void
 }) {
   const vs = `${inv.series}${String(companyId).slice(-5)}${String(inv.number).padStart(4,'0')}`
+  const amount = `${(inv.curr_total ?? inv.total ?? 0).toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${inv.currency}`
   const [to, setTo]       = useState('')
   const [cc, setCc]       = useState('')
   const [subject, setSubject] = useState(`Faktura č. ${vs} – ${inv.year}`)
   const [body, setBody]   = useState(
-    `Dobrý den,\n\nv příloze zasíláme fakturu č. ${vs}.\n\nS pozdravem\n1. Česká obchodní, s.r.o.`
+    `Dobrý den,\n\nv příloze vám zasíláme fakturu za služby TruckManager.\nVariabilní symbol: ${vs}\nZdanitelné plnění: ${inv.fulfilment ? inv.fulfilment.slice(0,10).split('-').reverse().join('.') : ''}\nSplatná: ${inv.maturity ? inv.maturity.slice(0,10).split('-').reverse().join('.') : ''}\nČástka celkem: ${amount}`
   )
+  const [signature, setSignature] = useState('')
   const [sending, setSending] = useState(false)
   const [sent, setSent]   = useState(false)
   const [error, setError] = useState('')
@@ -35,13 +39,24 @@ function InvoiceEmailModal({ inv, companyId, onClose, onSent }: {
     getInvoiceEmailContacts(String(inv.invoice_key))
       .then(addrs => { if (addrs[0]) setTo(addrs[0]) })
       .catch(() => {})
+    getMailContext(companyKey).then(data => {
+      if (data.context) {
+        const c = data.context
+        const lines = ['S pozdravem', c.employee_name ?? '']
+        if (c.employee_gsm)   lines.push(c.employee_gsm)
+        if (c.employee_email) lines.push(c.employee_email)
+        lines.push('', '1.Česká obchodní, s.r.o.', 'Potoční 340', '592 14 Nové Veselí (CZ)', 'IČO:60743395', 'DIČ:CZ60743395')
+        setSignature(lines.join('\n'))
+      }
+    }).catch(() => {})
   }, [inv.invoice_key])
 
   const handleSend = async () => {
     if (!to.trim()) return
     setSending(true); setError('')
     try {
-      await sendInvoiceEmail(String(inv.invoice_key), { to, cc: cc || undefined, subject, body })
+      const fullBody = signature.trim() ? `${body}\n\n${signature}` : body
+      await sendInvoiceEmail(String(inv.invoice_key), { to, cc: cc || undefined, subject, body: fullBody })
       setSent(true)
       setTimeout(onSent, 1200)
     } catch (e: any) { setError(e.message) }
@@ -86,6 +101,12 @@ function InvoiceEmailModal({ inv, companyId, onClose, onSent }: {
             <textarea rows={5}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               value={body} onChange={e => setBody(e.target.value)}/>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Podpis</label>
+            <textarea rows={4}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono text-gray-600"
+              value={signature} onChange={e => setSignature(e.target.value)}/>
           </div>
           <p className="text-xs text-gray-400">PDF faktura bude přiložena automaticky.</p>
           {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
@@ -404,6 +425,7 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
         <InvoiceEmailModal
           inv={emailTarget}
           companyId={companyId}
+          companyKey={companyKey}
           onClose={() => setEmailTarget(null)}
           onSent={() => { setEmailTarget(null); load(offset) }}
         />

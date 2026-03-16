@@ -131,6 +131,7 @@ export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => 
   const [bccEmail, setBccEmail] = useState('')
   const [noteType, setNoteType] = useState('S')
   const [activeGroup, setActiveGroup] = useState(GROUPS[0])
+  const [signature, setSignature] = useState('')
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
@@ -147,7 +148,16 @@ export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => 
         if (!initialEmail) setTo(data.recipients[0].email)
       }
       if (data.senders) setSenders(data.senders)
-      if (data.context) { setCtx(data.context); setBccEmail(data.context.employee_email ?? '') }
+      if (data.context) {
+        setCtx(data.context)
+        setBccEmail(data.context.employee_email ?? '')
+        const c = data.context
+        const lines = ['S pozdravem', c.employee_name ?? '']
+        if (c.employee_gsm)   lines.push(c.employee_gsm)
+        if (c.employee_email) lines.push(c.employee_email)
+        lines.push('', '1.Česká obchodní, s.r.o.', 'Potoční 340', '592 14 Nové Veselí (CZ)', 'IČO:60743395', 'DIČ:CZ60743395')
+        setSignature(lines.join('\n'))
+      }
     }).catch(() => {})
 
     getEmailTemplates().then(data => {
@@ -168,7 +178,8 @@ export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => 
     if (!to || !subject.trim() || !message.trim()) return
     setSending(true); setError('')
     try {
-      await sendMail({ company_key: Number(companyKey), to, sender, subject, message, bcc, bcc_email: bcc ? bccEmail : undefined, note_type: noteType, note_text: subject })
+      const fullMessage = signature.trim() ? `${message}\n\n${signature}` : message
+      await sendMail({ company_key: Number(companyKey), to, sender, subject, message: fullMessage, bcc, bcc_email: bcc ? bccEmail : undefined, note_type: noteType, note_text: subject })
       setSent(true)
       setTimeout(onClose, 1200)
     } catch (e: any) { setError(e.message) }
@@ -280,9 +291,17 @@ export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => 
               {/* Zpráva */}
               <div>
                 <label className="block text-xs font-medium text-gray-500 mb-1">Zpráva</label>
-                <textarea ref={msgRef} rows={8}
+                <textarea ref={msgRef} rows={7}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
                   value={message} onChange={e => setMessage(e.target.value)} placeholder="Text zprávy..." />
+              </div>
+
+              {/* Podpis */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Podpis</label>
+                <textarea rows={4}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono text-gray-600"
+                  value={signature} onChange={e => setSignature(e.target.value)} />
               </div>
 
               {/* BCC */}

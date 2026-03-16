@@ -651,6 +651,20 @@ else:
     print('Patch SKIP: Chrome launch args already patched', file=sys.stderr)
 PYEOF
 
+# Patch: invoicePdf.ts — nastav okraje PDF na 0
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/services/invoicePdf.ts'
+src = open(f).read()
+old = "      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },"
+new = "      margin: { top: '0', bottom: '0', left: '0', right: '0' },"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: invoicePdf margin 0', file=sys.stderr)
+else:
+    print('Patch SKIP: invoicePdf margin already set', file=sys.stderr)
+PYEOF
+
 # Patch: bankDb.ts — přesuň DB do /home/dev/ (bank.db v /services/admin-data je root-owned)
 python3 - <<'PYEOF'
 import sys
@@ -757,6 +771,48 @@ else:
     print('Patch SKIP: invoicing SMTP already patched or pattern not found', file=sys.stderr)
 PYEOF
 
+# Patch: invoicing.ts — destrukturuj smtpUser/smtpPass v POST /:id/send-email handleru
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/invoicing.ts'
+src = open(f).read()
+old = "    const { userDb, passwordDb } = (request as any).user\n    const sql = getUserSql(userDb, passwordDb)\n    const { id } = request.params as { id: string }\n    const { to, cc, subject, body } = request.body as {"
+new = "    const { userDb, passwordDb, smtpUser, smtpPass } = (request as any).user\n    const sql = getUserSql(userDb, passwordDb)\n    const { id } = request.params as { id: string }\n    const { to, cc, subject, body } = request.body as {"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: invoicing smtpUser/smtpPass destructure', file=sys.stderr)
+else:
+    print('Patch SKIP: invoicing smtpUser/smtpPass already destructured', file=sys.stderr)
+PYEOF
+
+# Patch: invoicing.ts — odstraň text: body (SMTP server ořezává non-ASCII v plaintext)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/invoicing.ts'
+src = open(f).read()
+old = "        html: body.replace(/\\n/g, '<br>'),\n        text: body,\n        attachments:"
+new = "        html: body.replace(/\\n/g, '<br>'),\n        attachments:"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: invoicing remove text:body', file=sys.stderr)
+else:
+    print('Patch SKIP: invoicing text:body already removed', file=sys.stderr)
+PYEOF
+
+# Patch: invoicing.ts — odstraň duplicate secure: false
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/invoicing.ts'
+src = open(f).read()
+old = "        secure: false,\n        ignoreTLS: true,\n        secure: false,"
+new = "        secure: false,\n        ignoreTLS: true,"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: invoicing duplicate secure removed', file=sys.stderr)
+else:
+    print('Patch SKIP: invoicing duplicate secure not found', file=sys.stderr)
+PYEOF
+
 # Patch: bank.ts — autoMatch: VS dekompozice (company.id), přeskočit series 5, invoices-search series filtr
 python3 - <<'PYEOF'
 import sys
@@ -847,6 +903,63 @@ if old in src:
     print('Patch OK: services UPDATE no COALESCE', file=sys.stderr)
 else:
     print('Patch SKIP: services UPDATE already patched', file=sys.stderr)
+PYEOF
+
+# Patch: companies/index.ts — přidej GET /:id/summary (souhrn aut, SIM, zakázek, faktur, objednávek)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+marker = "  // GET /api/companies/:id/online-log"
+insert = """  // GET /api/companies/:id/summary
+  app.get('/:id/summary', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    try {
+      const [cars, sims, obligations, invoices, orders] = await Promise.all([
+        sql`SELECT
+              COUNT(*) FILTER (WHERE inactive IS NOT TRUE) AS active,
+              COUNT(*) AS total
+            FROM gps.car_base
+            WHERE company_key = ${id}`,
+        sql`SELECT
+              COUNT(*) FILTER (WHERE NOT COALESCE(ie_disabled, false)) AS active,
+              COUNT(*) AS total
+            FROM gps.simcard_base WHERE company_key = ${id}`,
+        sql`SELECT
+              COUNT(*) FILTER (WHERE created_time >= NOW() - INTERVAL '7 days') AS recent,
+              COUNT(*) AS total
+            FROM ta.obligation_base WHERE company_key = ${id}`,
+        sql`SELECT
+              COUNT(*) FILTER (WHERE updated_time >= NOW() - INTERVAL '7 days') AS recent,
+              COUNT(*) AS total
+            FROM ta.invoice_base WHERE company_key = ${id}`,
+        sql`SELECT
+              COUNT(*) FILTER (WHERE created_time >= NOW() - INTERVAL '7 days') AS recent,
+              COUNT(*) AS total
+            FROM ta.order_base WHERE company_key = ${id}`,
+      ])
+      return reply.send({
+        cars:        { active: Number(cars[0]?.active ?? 0),        total: Number(cars[0]?.total ?? 0) },
+        sims:        { active: Number(sims[0]?.active ?? 0),        total: Number(sims[0]?.total ?? 0) },
+        obligations: { recent: Number(obligations[0]?.recent ?? 0), total: Number(obligations[0]?.total ?? 0) },
+        invoices:    { recent: Number(invoices[0]?.recent ?? 0),    total: Number(invoices[0]?.total ?? 0) },
+        orders:      { recent: Number(orders[0]?.recent ?? 0),      total: Number(orders[0]?.total ?? 0) },
+      })
+    } finally {
+      await sql.end()
+    }
+  })
+
+"""
+if '/:id/summary' not in src and marker in src:
+    open(f, 'w').write(src.replace(marker, insert + marker))
+    print('Patch OK: companies summary endpoint', file=sys.stderr)
+else:
+    print('Patch SKIP: companies summary already present', file=sys.stderr)
 PYEOF
 
 # Patch: sendMail.ts — destrukturuj smtpUser/smtpPass v POST /send handleru

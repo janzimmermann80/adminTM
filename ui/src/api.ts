@@ -82,6 +82,7 @@ export const getDiaryUpcoming = (initials: string) =>
 // ── Companies ─────────────────────────────────────────────────────────────────
 
 export const getCompany = (id: string) => get<any>(`/companies/${id}`)
+export const getCompanySummary = (id: string) => get<any>(`/companies/${id}/summary`)
 export const updateCompany = (id: string, body: Record<string, any>) => put<any>(`/companies/${id}`, body)
 export const updateServices = (id: string, body: Record<string, any>) => put<any>(`/companies/${id}/services`, body)
 export const updateInvoiceAddress = (id: string, body: Record<string, any>) =>

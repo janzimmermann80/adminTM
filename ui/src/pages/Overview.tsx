@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/Spinner'
+import { CompanyDetailModal } from '../components/CompanyDetailModal'
 import { useAuth } from '../context/AuthContext'
 import {
   getStatsOverview,
@@ -209,6 +210,8 @@ export const Overview = () => {
   const [activeRegion, setActiveRegion]         = useState<string | null>(null)
   const [regionLists, setRegionLists]           = useState<Record<string, any[]>>({})
   const [regionLoading, setRegionLoading]       = useState(false)
+  const [modalKey, setModalKey]                 = useState<string | null>(null)
+  const [modalTab, setModalTab]                 = useState<string>('info')
 
   useEffect(() => {
     const initials = user?.initials ?? ''
@@ -354,11 +357,15 @@ export const Overview = () => {
                   {(overdueList ?? []).map((c: any) => (
                     <tr
                       key={c.company_key}
-                      onClick={() => window.open(`#/company/${c.company_key}`, '_blank')}
+                      onClick={() => { setModalTab('invoices'); setModalKey(c.company_key) }}
                       className="hover:bg-red-50 cursor-pointer transition-colors"
                     >
                       <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.id}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{c.company}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        <a href={`#/company/${c.company_key}`} target="_blank" rel="noreferrer"
+                          onClick={e => e.stopPropagation()} className="hover:text-[#0a6b6b] hover:underline"
+                        >{c.company}</a>
+                      </td>
                       <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{c.city}</td>
                       <td className="px-4 py-3 hidden lg:table-cell">
                         {c.tariff_name ? (
@@ -414,11 +421,15 @@ export const Overview = () => {
                   {(regionLists[activeRegion] ?? []).map((c: any) => (
                     <tr
                       key={c.company_key}
-                      onClick={() => window.open(`#/company/${c.company_key}`, '_blank')}
+                      onClick={() => { setModalTab('invoices'); setModalKey(c.company_key) }}
                       className="hover:bg-red-50 cursor-pointer transition-colors"
                     >
                       <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.id}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{c.company}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        <a href={`#/company/${c.company_key}`} target="_blank" rel="noreferrer"
+                          onClick={e => e.stopPropagation()} className="hover:text-[#0a6b6b] hover:underline"
+                        >{c.company}</a>
+                      </td>
                       <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{c.city}</td>
                       <td className="px-4 py-3 hidden lg:table-cell">
                         {c.tariff_name ? (
@@ -473,11 +484,15 @@ export const Overview = () => {
                   {(expiredList ?? []).map((c: any) => (
                     <tr
                       key={c.company_key}
-                      onClick={() => window.open(`#/company/${c.company_key}`, '_blank')}
+                      onClick={() => { setModalTab('info'); setModalKey(c.company_key) }}
                       className="hover:bg-red-50 cursor-pointer transition-colors"
                     >
                       <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.comp_id}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900">{c.comp_name}</td>
+                      <td className="px-4 py-3 font-medium text-gray-900">
+                        <a href={`#/company/${c.company_key}`} target="_blank" rel="noreferrer"
+                          onClick={e => e.stopPropagation()} className="hover:text-[#0a6b6b] hover:underline"
+                        >{c.comp_name}</a>
+                      </td>
                       <td className="px-4 py-3 text-gray-600 hidden md:table-cell text-xs">{c.usr}</td>
                       <td className="px-4 py-3 hidden lg:table-cell text-xs text-gray-500">{c.import_type}</td>
                       <td className="px-4 py-3 hidden lg:table-cell text-xs text-red-500 font-medium">
@@ -609,6 +624,13 @@ export const Overview = () => {
             </table>
           </div>
         </div>
+      )}
+      {modalKey && (
+        <CompanyDetailModal
+          companyKey={modalKey}
+          initialTab={modalTab}
+          onClose={() => setModalKey(null)}
+        />
       )}
     </Layout>
   )
