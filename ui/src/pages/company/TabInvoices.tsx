@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react'
 import {
   getInvoices, getInvoiceEmailContacts, sendInvoiceEmail,
   getMailContext,
-  settleInvoice, cancelInvoice, deleteInvoice, downloadInvoicePdf,
+  cancelInvoice, deleteInvoice, downloadInvoicePdf,
 } from '../../api'
 import { Spinner } from '../../components/Spinner'
 import { Pagination } from '../../components/Pagination'
+import { InvoiceFormModal } from '../../components/InvoiceFormModal'
 import { formatDate, formatNumber } from '../../utils'
 import type { Invoice } from '../../types'
 import { INVOICE_SERIES_LABELS } from '../../types'
@@ -130,96 +131,6 @@ function InvoiceEmailModal({ inv, companyId, companyKey, onClose, onSent }: {
   )
 }
 
-// ── Edit modal (uhrazení) ────────────────────────────────────────────────────
-function InvoiceEditModal({ inv, companyId, onClose, onSaved }: {
-  inv: Invoice
-  companyId: string
-  onClose: () => void
-  onSaved: () => void
-}) {
-  const invoiceVs = (i: Invoice) => `${i.series}${String(companyId).slice(-5)}${String(i.number).padStart(4,'0')}`
-  const today = new Date().toISOString().slice(0,10)
-  const [date, setDate]   = useState(inv.settlement ?? today)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-
-  const handleSettle = async () => {
-    setSaving(true); setError('')
-    try {
-      await settleInvoice(String(inv.invoice_key), date)
-      onSaved()
-    } catch (e: any) { setError(e.message) }
-    finally { setSaving(false) }
-  }
-
-  const handleUnsettle = async () => {
-    if (!confirm('Zrušit označení jako uhrazeno?')) return
-    setSaving(true); setError('')
-    try {
-      // null date = clear settlement (backend needs support — send empty string)
-      await settleInvoice(String(inv.invoice_key), '')
-      onSaved()
-    } catch (e: any) { setError(e.message) }
-    finally { setSaving(false) }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
-          <div className="flex items-center gap-2 font-semibold text-gray-800">
-            <svg className="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
-            </svg>
-            Faktura {invoiceVs(inv)}
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/>
-            </svg>
-          </button>
-        </div>
-
-        <div className="px-5 py-5 space-y-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Datum úhrady</label>
-            <input type="date"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-teal-500"
-              value={date} onChange={e => setDate(e.target.value)}/>
-          </div>
-          {inv.settlement && (
-            <div className="text-sm text-green-600">
-              Aktuálně uhrazeno: <strong>{formatDate(inv.settlement)}</strong>
-            </div>
-          )}
-          {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
-        </div>
-
-        <div className="flex justify-between px-5 py-4 border-t border-gray-100">
-          {inv.settlement ? (
-            <button onClick={handleUnsettle} disabled={saving}
-              className="px-3 py-2 text-sm text-red-500 hover:bg-red-50 rounded-lg disabled:opacity-50">
-              Zrušit úhradu
-            </button>
-          ) : <div/>}
-          <div className="flex gap-2">
-            <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Zrušit</button>
-            <button onClick={handleSettle} disabled={saving || !date}
-              className="flex items-center gap-2 px-4 py-2 text-sm bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors">
-              {saving ? <Spinner size={4}/> : (
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
-                </svg>
-              )}
-              Uložit úhradu
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── Hlavní komponenta ────────────────────────────────────────────────────────
 export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
   const invoiceVs = (inv: Invoice) => `${inv.series}${String(companyId).slice(-5)}${String(inv.number).padStart(4,'0')}`
@@ -318,7 +229,7 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
                     {invoiceVs(inv)}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-teal-600 hidden sm:table-cell">
-                    {inv.proforma_number ? `P${inv.proforma_number}` : ''}
+                    {inv.proforma_number ?? ''}
                   </td>
                   <td className="px-4 py-3 hidden sm:table-cell">
                     <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 text-xs">
@@ -431,9 +342,8 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
         />
       )}
       {editTarget && (
-        <InvoiceEditModal
-          inv={editTarget}
-          companyId={companyId}
+        <InvoiceFormModal
+          invoiceKey={editTarget.invoice_key}
           onClose={() => setEditTarget(null)}
           onSaved={() => { setEditTarget(null); load(offset) }}
         />

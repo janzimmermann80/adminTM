@@ -76,6 +76,10 @@ export const getStatsOverdueCompanies = (region?: string) =>
   get<any[]>(`/statistics/overdue-companies${region ? `?region=${encodeURIComponent(region)}` : ''}`)
 export const getStatsDiaryByOwner = () => get<any[]>('/statistics/diary-by-owner')
 export const getStatsLentMonthly = () => get<any[]>('/statistics/lent-monthly')
+export const getStatsOrdersMonthly = () => get<any[]>('/statistics/orders-monthly')
+export const getStatsLentAccessStats = () => get<any>('/statistics/lent-access-stats')
+export const getStatsOrderBaseMonthly   = () => get<any[]>('/statistics/order-base-monthly')
+export const getStatsInvoiceBaseMonthly = () => get<any[]>('/statistics/invoice-base-monthly')
 export const getDiaryUpcoming = (initials: string) =>
   get<any>(`/diary?owner=${encodeURIComponent(initials)}&days=14`)
 
@@ -113,6 +117,12 @@ export const cancelInvoice = (id: string) =>
   put<{ success: boolean }>(`/invoicing/${id}/cancel`, {})
 export const deleteInvoice = (id: string) =>
   del<{ success: boolean }>(`/invoicing/${id}`)
+export const getInvoicingMeta = () =>
+  get<{ series: Record<string, string>; payment_methods: Record<string, string> }>('/invoicing/meta')
+export const getInvoicingServices = () => get<any[]>('/invoicing/services')
+export const updateInvoice = (id: string, body: any) => put<any>(`/invoicing/${id}`, body)
+export const createInvoiceSingle = (body: any) => post<any>('/invoicing/create', body)
+
 export const downloadInvoicePdf = async (id: string): Promise<Blob> => {
   const r = await fetch(buildUrl(`/invoicing/${id}/pdf`), { headers: h() })
   if (!r.ok) throw new Error('PDF se nepodařilo vygenerovat')

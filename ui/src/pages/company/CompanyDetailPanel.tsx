@@ -99,6 +99,7 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
           <div className="flex flex-wrap items-start gap-4 justify-between">
             <div>
               <div className="flex items-center gap-3 mb-1">
+                <span className="text-gray-300 font-mono text-sm">{companyKey}</span>
                 <span className="text-gray-400 font-mono text-sm">{company.id}</span>
                 {company.tariff_name && (
                   <span className="bg-teal-100 text-[#0a6b6b] text-xs rounded-full px-2.5 py-0.5 font-medium">

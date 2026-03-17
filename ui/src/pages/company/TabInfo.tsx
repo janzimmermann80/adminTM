@@ -44,11 +44,12 @@ export const TabInfo = ({ company, onReload }: Props) => {
   const [cinLookupLoading, setCinLookupLoading] = useState(false)
   const [cinLookupError, setCinLookupError] = useState('')
   const [tariffs, setTariffs] = useState<{ tariff: string; name: string }[]>([])
+  const [branches, setBranches] = useState<{ branch: string; name: string }[]>([])
   const [tariff, setTariff] = useState(company.tariff ?? '')
   const [tariffSaving, setTariffSaving] = useState(false)
 
   useEffect(() => {
-    getSearchMeta().then(m => setTariffs(m.tariffs)).catch(() => {})
+    getSearchMeta().then(m => { setTariffs(m.tariffs); setBranches(m.branches ?? []) }).catch(() => {})
   }, [])
 
   // Basic form state
@@ -64,6 +65,7 @@ export const TabInfo = ({ company, onReload }: Props) => {
     account: company.account ?? '',
     branch: company.branch ?? '',
     region: company.region ?? '',
+    url: company.url ?? '',
   })
 
   // Services form state
@@ -272,6 +274,31 @@ export const TabInfo = ({ company, onReload }: Props) => {
                 <div>
                   <label className={labelCls}>Číslo účtu</label>
                   <input className={ic} readOnly={ro} value={basic.account} onFocus={activate} onChange={e => setBasic(p => ({ ...p, account: e.target.value }))} />
+                </div>
+                <div>
+                  <label className={labelCls}>URL</label>
+                  {ro && basic.url ? (
+                    <a href={basic.url.startsWith('http') ? basic.url : `https://${basic.url}`}
+                      target="_blank" rel="noreferrer"
+                      className={`${inputRoCls} text-blue-600 hover:underline block`}>
+                      {basic.url}
+                    </a>
+                  ) : (
+                    <input className={ro ? inputRoCls : ic} readOnly={ro} value={basic.url} onFocus={activate}
+                      onChange={e => setBasic(p => ({ ...p, url: e.target.value }))} />
+                  )}
+                </div>
+                <div>
+                  <label className={labelCls}>Obor</label>
+                  {ro ? (
+                    <input className={inputRoCls} readOnly value={company.branch_name ?? ''} />
+                  ) : (
+                    <select className={ic} value={basic.branch}
+                      onChange={e => setBasic(p => ({ ...p, branch: e.target.value }))}>
+                      <option value="">— bez oboru —</option>
+                      {branches.map(b => <option key={b.branch} value={b.branch}>{b.name}</option>)}
+                    </select>
+                  )}
                 </div>
 
               </div>

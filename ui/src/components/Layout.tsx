@@ -100,7 +100,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Fakturace',       icon: <IconInvoice />,    disabled: true },
   { label: 'Nabídky',         icon: <IconOffer />,      disabled: true },
   { label: 'Deník',           icon: <IconDiary />,      disabled: true },
-  { label: 'Statistiky',      icon: <IconStats />,      disabled: true },
+  { to: '/statistics',        label: 'Statistiky',      icon: <IconStats /> },
   { label: 'TruckManager',    icon: <IconTruck />,      disabled: true },
   { label: 'Odeslat e-mail',  icon: <IconEmail />,      disabled: true },
   { label: 'Odeslat SMS',     icon: <IconSms />,        disabled: true },

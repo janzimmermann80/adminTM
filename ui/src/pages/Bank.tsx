@@ -6,6 +6,8 @@ import {
   getBankTransactions, matchBankTransaction, unmatchBankTransaction,
   searchBankInvoices, uploadBankXml, getBankStatements, deleteBankStatement, settleInvoice,
 } from '../api'
+import { InvoiceFormModal } from '../components/InvoiceFormModal'
+import { CompanyDetailPanel } from './company/CompanyDetailPanel'
 
 // ── Invoice search modal ──────────────────────────────────────────────────────
 function InvoiceSearchModal({ tx, onClose, onMatched }: {
@@ -18,6 +20,7 @@ function InvoiceSearchModal({ tx, onClose, onMatched }: {
   const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [invoiceFormTarget, setInvoiceFormTarget] = useState<{ companyKey: number; prefill: any } | null>(null)
 
   const search = async (val: string) => {
     if (!val.trim()) return
@@ -41,6 +44,7 @@ function InvoiceSearchModal({ tx, onClose, onMatched }: {
   }
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
@@ -83,6 +87,42 @@ function InvoiceSearchModal({ tx, onClose, onMatched }: {
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-sm font-semibold text-gray-800">{formatNumber(inv.total)} {inv.currency}</span>
+                    {isProforma && (
+                      <button onClick={() => {
+                        const series = Number(inv.series)
+                        const itemName = series === 4
+                          ? `Předplatné systému TruckManager Doprava & Spedice pro ${inv.quantity} vozidel`
+                          : series === 1
+                            ? 'Předplatné systému TruckManager Spedice'
+                            : ''
+                        setInvoiceFormTarget({ companyKey: inv.company_key, prefill: {
+                          series: 4,
+                          proforma_number: parseInt('5' + inv.series + String(inv.company_id).slice(-5) + inv.number),
+                          currency: inv.currency,
+                          curr_value: inv.exchange_rate && inv.exchange_rate !== 1 ? inv.exchange_rate : undefined,
+                          issued: tx.transaction_date?.slice(0, 10),
+                          fulfilment: tx.transaction_date?.slice(0, 10),
+                          maturity: tx.transaction_date?.slice(0, 10),
+                          settlement: tx.transaction_date?.slice(0, 10),
+                          payment_method: 'T',
+                          items: itemName ? (() => {
+                            const qty = inv.quantity || 1
+                            // inv.total může být null — záloha z banky tx.amount je spolehlivý základ
+                            const paidTotal = inv.total != null ? Number(inv.total)
+                              : (inv.currency !== 'CZK' && Number(inv.exchange_rate) > 1)
+                                ? tx.amount / Number(inv.exchange_rate)
+                                : tx.amount
+                            const priceUnit = inv.currency === 'CZK'
+                              ? Math.round(paidTotal / qty / 1.21 * 100) / 100
+                              : Math.round(paidTotal / qty * 100) / 100
+                            return [{ name: itemName, price_unit: priceUnit, vat_rate: inv.currency === 'CZK' ? 21 : 0, quantity: qty, discount: 0 }]
+                          })() : undefined,
+                        }})
+                      }} disabled={saving}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-lg text-xs disabled:opacity-60">
+                        Vystavit fakturu
+                      </button>
+                    )}
                     <button onClick={() => handleMatch(inv.invoice_key)} disabled={saving}
                       className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1 rounded-lg text-xs disabled:opacity-60">
                       {isProforma ? 'Přiřadit' : 'Spárovat'}
@@ -106,15 +146,25 @@ function InvoiceSearchModal({ tx, onClose, onMatched }: {
         </div>
       </div>
     </div>
+    {invoiceFormTarget && (
+      <InvoiceFormModal
+        companyKey={invoiceFormTarget.companyKey}
+        prefill={invoiceFormTarget.prefill}
+        onClose={() => setInvoiceFormTarget(null)}
+        onSaved={() => setInvoiceFormTarget(null)}
+      />
+    )}
+  </>
   )
 }
 
 // ── Statements accordion ─────────────────────────────────────────────────────
-function StatementRow({ tx, onUnmatch, onMatch, onSettle }: {
+function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany }: {
   tx: any
   onUnmatch: (id: number) => void
   onMatch: (tx: any) => void
   onSettle: (tx: any) => void
+  onOpenCompany: (companyKey: number) => void
 }) {
   const isCredit = tx.credit_debit === 'CRDT'
   const isMatched = !!(tx.matched_invoice_id || tx.matched_company_key)
@@ -131,11 +181,11 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle }: {
       </td>
       <td className="px-4 py-2.5 text-xs">
         {isMatched ? (
-          <div>
+          <button className="text-left hover:opacity-75 transition-opacity" onClick={() => tx.invoice_company_key && onOpenCompany(tx.invoice_company_key)}>
             {!isProforma && <div className="font-medium text-teal-700">{tx.invoice_year}/{tx.invoice_number}</div>}
             {isProforma && <div className="font-medium text-purple-700">Záloha</div>}
             <div className="text-gray-500 truncate max-w-[120px]">{tx.invoice_company}</div>
-          </div>
+          </button>
         ) : (
           <span className="text-amber-600 font-medium">{isProforma ? 'Záloha — nenalezena' : 'Nespárováno'}</span>
         )}
@@ -165,10 +215,11 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle }: {
   )
 }
 
-function StatementsAccordion({ onDeleted, onMatch, onUnmatch }: {
+function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany }: {
   onDeleted: () => void
   onMatch: (tx: any) => void
   onUnmatch: (id: number) => void
+  onOpenCompany: (companyKey: number) => void
 }) {
   const [statements, setStatements] = useState<any[]>([])
   const [open, setOpen] = useState<number | null>(null)
@@ -249,7 +300,7 @@ function StatementsAccordion({ onDeleted, onMatch, onUnmatch }: {
           {/* Hlavička */}
           <button className="w-full flex items-center justify-between px-5 py-3 text-left hover:bg-gray-50 transition-colors" onClick={() => toggleOpen(s.id)}>
             <div className="flex flex-wrap items-center gap-3 text-sm min-w-0">
-              <span className="font-medium text-gray-800 truncate">{s.filename}</span>
+              <span className="font-medium text-gray-800 shrink-0">Výpis č. {s.seq_number ?? s.id}</span>
               {s.account_number && <span className="text-gray-500 shrink-0">Účet: <span className="font-mono">{s.account_number}</span></span>}
               {s.period_from && <span className="text-gray-500 shrink-0">{formatDate(s.period_from)}{s.period_to && s.period_to !== s.period_from ? ` – ${formatDate(s.period_to)}` : ''}</span>}
               {s.opening_balance != null && <span className="text-gray-500 shrink-0">Počáteční: <span className="font-medium text-gray-700">{formatNumber(s.opening_balance)} {s.currency}</span></span>}
@@ -293,6 +344,7 @@ function StatementsAccordion({ onDeleted, onMatch, onUnmatch }: {
                       <StatementRow key={tx.id} tx={tx}
                         onUnmatch={async (id) => { await onUnmatch(id); refreshTx(s.id) }}
                         onMatch={(tx) => { onMatch(tx) }}
+                        onOpenCompany={onOpenCompany}
                         onSettle={async (tx) => {
                           try {
                             await settleInvoice(String(tx.matched_invoice_id), tx.transaction_date)
@@ -323,6 +375,7 @@ export const Bank = () => {
   // Párování
   const [matchTarget, setMatchTarget] = useState<any | null>(null)
   const [statementsKey, setStatementsKey] = useState(0)
+  const [companyPanelKey, setCompanyPanelKey] = useState<number | null>(null)
 
   const [dragOver, setDragOver] = useState(false)
 
@@ -404,6 +457,7 @@ export const Bank = () => {
         onDeleted={() => setStatementsKey(k => k + 1)}
         onMatch={tx => setMatchTarget(tx)}
         onUnmatch={handleUnmatch}
+        onOpenCompany={key => setCompanyPanelKey(key)}
       />
 
       {matchTarget && (
@@ -412,6 +466,18 @@ export const Bank = () => {
           onClose={() => setMatchTarget(null)}
           onMatched={() => setMatchTarget(null)}
         />
+      )}
+
+      {companyPanelKey && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setCompanyPanelKey(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <CompanyDetailPanel
+              companyKey={String(companyPanelKey)}
+              initialTab="invoices"
+              onClose={() => setCompanyPanelKey(null)}
+            />
+          </div>
+        </div>
       )}
     </Layout>
   )

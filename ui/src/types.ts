@@ -27,6 +27,8 @@ export interface CompanyDetail extends Company {
   bank: string
   account: string
   branch: string
+  branch_name?: string
+  url?: string
   provider: string
   parent_key?: number
   credit_tip_sms?: number
@@ -198,12 +200,12 @@ export const CONTACT_TYPE_LABELS: Record<string, string> = {
 }
 
 export const INVOICE_SERIES_LABELS: Record<string, string> = {
-  '1': 'Internet',
+  '1': 'Spedice',
   '2': 'Modem Euro',
   '3': 'Modem CZ',
-  '4': 'TruckAgenda',
+  '4': 'TM+SIM',
   '6': 'Hardware',
   '7': 'SMS',
-  '8': 'Školení',
+  '8': 'Doprava',
   '9': 'Reklama',
 }

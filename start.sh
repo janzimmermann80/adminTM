@@ -17,6 +17,54 @@ cp /services/admin-data/tsconfig.json "$MYDIR/"
 cp /services/admin-data/package.json "$MYDIR/"
 ln -s /services/admin-data/node_modules "$MYDIR/node_modules"
 
+# Patch: companies/:id — přidej url (kontakt typ H) a branch_name + PUT url upsert
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+# GET: přidej branch_name a url subquery
+old = '''               CD.credit_tip_sms, CD.contract, CD.contract_date,'''
+new = '''               B.name AS branch_name,
+               (SELECT value FROM provider.contact
+                WHERE company_key = C.company_key AND type = 'H'
+                LIMIT 1) AS url,
+               CD.credit_tip_sms, CD.contract, CD.contract_date,'''
+old2 = '''        LEFT JOIN provider.company_invoice_address AS CIA ON C.company_key = CIA.company_key
+        WHERE C.company_key = ${id}'''
+new2 = '''        LEFT JOIN provider.company_invoice_address AS CIA ON C.company_key = CIA.company_key
+        LEFT JOIN provider.branch AS B ON B.branch = C.branch
+        WHERE C.company_key = ${id}'''
+# PUT: přidej url do body type a upsert logiku
+old3 = "      account?: string; branch?: string; tariff?: string; region?: string\n    }"
+new3 = "      account?: string; branch?: string; tariff?: string; region?: string\n      url?: string | null\n    }"
+old4 = "      return reply.send({ success: true })\n    } finally {\n      await sql.end()\n    }\n  })\n\n  // GET /api/companies/:id/contacts"
+new4 = """      if (body.url !== undefined) {
+        const existing = await sql`SELECT contact_key FROM provider.contact WHERE company_key = ${id} AND type = 'H' LIMIT 1`
+        if (existing.length > 0) {
+          if (!body.url) {
+            await sql`DELETE FROM provider.contact WHERE company_key = ${id} AND type = 'H'`
+          } else {
+            await sql`UPDATE provider.contact SET value = ${body.url} WHERE company_key = ${id} AND type = 'H'`
+          }
+        } else if (body.url) {
+          await sql`INSERT INTO provider.contact (company_key, type, value, send_tips, by_name) VALUES (${id}, 'H', ${body.url}, false, false)`
+        }
+      }
+      return reply.send({ success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/companies/:id/contacts"""
+if 'branch_name' not in src:
+    src = src.replace(old, new).replace(old2, new2).replace(old3, new3).replace(old4, new4)
+    open(f, 'w').write(src)
+    print('Patch OK: companies url + branch_name + PUT url', file=sys.stderr)
+else:
+    print('Patch SKIP: already patched', file=sys.stderr)
+PYEOF
+
 # Patch: tracking_last místo car_base pro KPI "Vozidla TM"
 python3 - <<'PYEOF'
 import sys
@@ -1062,6 +1110,32 @@ else:
     print('Patch SKIP: bank.ts statement_id filter already patched', file=sys.stderr)
 PYEOF
 
+# Patch: bank.ts — DELETE /statements/:id
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+anchor = '  // GET /api/bank/statements/:id — detail výpisu + transakce'
+new_block = '''  // DELETE /api/bank/statements/:id
+  app.delete('/statements/:id', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const result = db.prepare('DELETE FROM bank_statements WHERE id = ?').run(Number(id))
+    if (result.changes === 0) return reply.status(404).send({ error: 'Not found' })
+    return reply.send({ ok: true })
+  })
+
+  // GET /api/bank/statements/:id — detail výpisu + transakce'''
+if "app.delete('/statements/:id'" in src:
+    print('Patch SKIP: bank.ts DELETE /statements/:id already present', file=sys.stderr)
+elif anchor in src:
+    open(f, 'w').write(src.replace(anchor, new_block))
+    print('Patch OK: bank.ts DELETE /statements/:id', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts DELETE /statements/:id anchor not found', file=sys.stderr)
+PYEOF
+
 # Patch: bank.ts — přidej invoice_settlement do odpovědi /transactions
 python3 - <<'PYEOF'
 import sys
@@ -1078,6 +1152,1052 @@ if old in src:
     print('Patch OK: bank.ts invoice_settlement', file=sys.stderr)
 else:
     print('Patch SKIP: bank.ts invoice_settlement already patched', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — přidej i.company_key do invoice SELECT a invoice_company_key do výsledku
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+if 'invoice_company_key' in src:
+    print('Patch SKIP: bank.ts invoice_company_key already present', file=sys.stderr)
+else:
+    src = src.replace(
+        'SELECT i.invoice_key, i.number, i.year, i.total, i.settlement, c.company\n          FROM provider.invoice i',
+        'SELECT i.invoice_key, i.number, i.year, i.total, i.settlement, i.company_key, c.company\n          FROM provider.invoice i'
+    )
+    src = src.replace(
+        'invoice_company:    invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,\n        invoice_settlement: invoiceMap[t.matched_invoice_id]?.settlement ?? null,',
+        'invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,\n        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,\n        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,'
+    )
+    src = src.replace(
+        'invoice_company:    invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,\n        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,\n        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,',
+        'invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,\n        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,\n        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,'
+    )
+    open(f, 'w').write(src)
+    print('Patch OK: bank.ts invoice_company_key', file=sys.stderr)
+PYEOF
+
+# Patch: camt053Parser — nový formát ČSOB (Strd[], PRCD balance, VS: prefix, splitXmlDocuments)
+python3 - <<'PYEOF'
+import sys
+new_content = r'''/**
+ * Parser pro ČSOB SEPAXML výpisy (ISO 20022 CAMT.053)
+ */
+
+import { XMLParser } from 'fast-xml-parser'
+
+export interface ParsedStatement {
+  accountIban: string
+  accountNumber: string
+  periodFrom: string
+  periodTo: string
+  openingBalance: number
+  closingBalance: number
+  currency: string
+  transactions: ParsedTransaction[]
+}
+
+export interface ParsedTransaction {
+  entryRef: string
+  transactionDate: string
+  valueDate: string
+  amount: number
+  currency: string
+  creditDebit: 'CRDT' | 'DBIT'
+  counterpartyName: string
+  counterpartyIban: string
+  vs: string
+  ks: string
+  ss: string
+  remittanceInfo: string
+}
+
+const parser = new XMLParser({
+  ignoreAttributes: false,
+  attributeNamePrefix: '@_',
+  removeNSPrefix: true,
+  isArray: (tagName) => ['Ntry', 'Bal', 'TxDtls', 'Strd'].includes(tagName),
+})
+
+/** Rekurzivně najde první hodnotu klíče v objektu */
+function findKey(obj: any, key: string): any {
+  if (!obj || typeof obj !== 'object') return undefined
+  if (key in obj) return obj[key]
+  for (const v of Object.values(obj)) {
+    const found = findKey(v, key)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/**
+ * Rozdělí XML soubor obsahující více <Document> elementů na jednotlivé dokumenty.
+ * ČSOB posílá více výpisů (různé účty) v jednom souboru jako zřetězené XML dokumenty.
+ */
+export function splitXmlDocuments(content: string): string[] {
+  const parts = content.split(/(?=<\?xml\s)/i).map(s => s.trim()).filter(Boolean)
+  return parts.length > 0 ? parts : [content]
+}
+
+export function parseCamt053(xmlContent: string): ParsedStatement {
+  const doc = parser.parse(xmlContent)
+
+  // Najdeme Stmt bez ohledu na namespace prefixes nebo hloubku zanořování
+  const stmt = findKey(doc, 'Stmt')
+
+  if (!stmt) throw new Error('Neplatný CAMT.053 XML — element Stmt nenalezen')
+
+  // Účet
+  const acctId = stmt['Acct']?.['Id']
+  const accountIban: string = acctId?.['IBAN'] ?? acctId?.['Othr']?.['Id'] ?? ''
+  const accountNumber: string = acctId?.['Othr']?.['Id'] ?? accountIban
+
+  // Období
+  const frToDt = stmt['FrToDt']
+  const periodFrom: string = (frToDt?.['FrDtTm'] ?? frToDt?.['FrDt'] ?? '').toString().slice(0, 10)
+  const periodTo: string = (frToDt?.['ToDtTm'] ?? frToDt?.['ToDt'] ?? '').toString().slice(0, 10)
+
+  // Zůstatky — PRCD = počáteční (nový formát), OPBD = počáteční (starý), CLBD = závěrečný
+  let openingBalance = 0
+  let closingBalance = 0
+  let currency = 'CZK'
+
+  const balances: any[] = Array.isArray(stmt['Bal']) ? stmt['Bal'] : (stmt['Bal'] ? [stmt['Bal']] : [])
+  for (const bal of balances) {
+    const cd = bal['Tp']?.['CdOrPrtry']?.['Cd'] ?? ''
+    const amt = bal['Amt']
+    const amtVal = typeof amt === 'object' ? Number(amt['#text'] ?? amt) : Number(amt)
+    const ccy = typeof amt === 'object' ? (amt['@_Ccy'] ?? 'CZK') : 'CZK'
+    const sign = bal['CdtDbtInd'] === 'DBIT' ? -1 : 1
+    currency = ccy
+    if (cd === 'OPBD' || cd === 'PRCD') openingBalance = amtVal * sign
+    if (cd === 'CLBD') closingBalance = amtVal * sign
+  }
+
+  // Transakce
+  const entries: any[] = Array.isArray(stmt['Ntry']) ? stmt['Ntry'] : (stmt['Ntry'] ? [stmt['Ntry']] : [])
+  const transactions: ParsedTransaction[] = entries.map((ntry: any) => parseEntry(ntry, currency))
+
+  return {
+    accountIban,
+    accountNumber,
+    periodFrom,
+    periodTo,
+    openingBalance,
+    closingBalance,
+    currency,
+    transactions,
+  }
+}
+
+function parseEntry(ntry: any, defaultCurrency: string): ParsedTransaction {
+  // Částka
+  const amtEl = ntry['Amt']
+  const amount: number = typeof amtEl === 'object'
+    ? Number(amtEl['#text'] ?? amtEl)
+    : Number(amtEl)
+  const currency: string = typeof amtEl === 'object' ? (amtEl['@_Ccy'] ?? defaultCurrency) : defaultCurrency
+  const creditDebit: 'CRDT' | 'DBIT' = ntry['CdtDbtInd'] === 'DBIT' ? 'DBIT' : 'CRDT'
+
+  // Datum
+  const transactionDate: string = (ntry['BookgDt']?.['Dt'] ?? ntry['BookgDt']?.['DtTm'] ?? '').toString().slice(0, 10)
+  const valueDate: string = (ntry['ValDt']?.['Dt'] ?? ntry['ValDt']?.['DtTm'] ?? transactionDate).toString().slice(0, 10)
+
+  // Reference
+  const entryRef: string = ntry['AcctSvcrRef'] ?? ntry['NtryRef'] ?? ''
+
+  // Detail transakce
+  const ntryDtls = ntry['NtryDtls']
+  const txDtlsList: any[] = !ntryDtls ? [] : (
+    Array.isArray(ntryDtls['TxDtls']) ? ntryDtls['TxDtls'] : (ntryDtls['TxDtls'] ? [ntryDtls['TxDtls']] : [])
+  )
+  const tx = txDtlsList[0] ?? {}
+
+  // Protistrana
+  const rltdPties = tx['RltdPties'] ?? {}
+  const counterpartyName: string = creditDebit === 'CRDT'
+    ? (rltdPties['Dbtr']?.['Nm'] ?? rltdPties['Dbtr']?.['Pty']?.['Nm'] ?? '')
+    : (rltdPties['Cdtr']?.['Nm'] ?? rltdPties['Cdtr']?.['Pty']?.['Nm'] ?? '')
+  const counterpartyAcct = creditDebit === 'CRDT'
+    ? rltdPties['DbtrAcct']?.['Id']
+    : rltdPties['CdtrAcct']?.['Id']
+  const counterpartyIban: string = counterpartyAcct?.['IBAN'] ?? counterpartyAcct?.['Othr']?.['Id'] ?? ''
+
+  // Variabilní a jiné symboly — nový formát: Strd[] s prefixem "VS:", "KS:", "SS:"
+  const refs = tx['Refs'] ?? {}
+  const addtlInfo: string = (tx['AddtlTxInf'] ?? ntry['AddtlNtryInf'] ?? '').toString()
+  const rmtInf = tx['RmtInf'] ?? {}
+  const rmtUstrd: string = (Array.isArray(rmtInf['Ustrd']) ? rmtInf['Ustrd'][0] : rmtInf['Ustrd']) ?? ''
+
+  // Strd je nyní pole — každý symbol (VS, KS, SS) je ve vlastním elementu s prefixem
+  const strdList: any[] = Array.isArray(rmtInf['Strd']) ? rmtInf['Strd'] : (rmtInf['Strd'] ? [rmtInf['Strd']] : [])
+  const strdRefs: string[] = strdList.map(s => String(s['CdtrRefInf']?.['Ref'] ?? ''))
+
+  const vs = extractVs(refs, addtlInfo, strdRefs, rmtUstrd)
+  const ks = strdRefs.map(r => extractSymbol('KS', r)).find(v => v) || extractSymbol('KS', addtlInfo)
+  const ss = strdRefs.map(r => extractSymbol('SS', r)).find(v => v) || extractSymbol('SS', addtlInfo)
+
+  const remittanceInfo: string = rmtUstrd || addtlInfo || strdRefs.join(' ')
+
+  return {
+    entryRef,
+    transactionDate,
+    valueDate,
+    amount,
+    currency,
+    creditDebit,
+    counterpartyName,
+    counterpartyIban,
+    vs,
+    ks,
+    ss,
+    remittanceInfo,
+  }
+}
+
+function extractVs(refs: any, addtlInfo: string, strdRefs: string[], rmtUstrd: string): string {
+  // 1. Structured remittance refs — nový formát: "VS:12345", starý: jen číslo
+  for (const ref of strdRefs) {
+    const fromRef = extractSymbol('VS', ref)
+    if (fromRef) return fromRef
+    if (/^\d+$/.test(ref.trim())) return ref.trim()
+  }
+
+  // 2. EndToEndId (může být ve formátu /VS/KS/SS nebo jen číslo)
+  const e2e: string = refs['EndToEndId'] ?? ''
+  if (e2e && e2e !== 'NOTPROVIDED') {
+    const vsMatch = e2e.match(/(?:^|\/)(\d{1,10})(?:\/|$)/)
+    if (vsMatch) return vsMatch[1]
+    if (/^\d{1,10}$/.test(e2e.trim())) return e2e.trim()
+  }
+
+  // 3. AddtlTxInf — formát "VS:12345 KS:..."
+  const vsFromAddtl = extractSymbol('VS', addtlInfo)
+  if (vsFromAddtl) return vsFromAddtl
+
+  // 4. Unstructured remittance
+  const vsFromUstrd = extractSymbol('VS', rmtUstrd)
+  if (vsFromUstrd) return vsFromUstrd
+
+  return ''
+}
+
+function extractSymbol(symbol: string, text: string): string {
+  if (!text) return ''
+  const re = new RegExp(`(?:${symbol}[:\\s/])(\\d{1,10})(?:[/\\s]|$)`, 'i')
+  const m = re.exec(text)
+  return m ? m[1] : ''
+}
+'''
+open('/services/admin-data/patched/src/services/camt053Parser.ts', 'w').write(new_content)
+print('Patch OK: camt053Parser — nový formát ČSOB', file=sys.stderr)
+PYEOF
+
+# Patch: camt053Parser — seqNumber (ElctrncSeqNb / LglSeqNb)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/services/camt053Parser.ts'
+src = open(f).read()
+if 'seqNumber' in src:
+    print('Patch SKIP: camt053Parser seqNumber already present', file=sys.stderr)
+else:
+    src = src.replace(
+        'export interface ParsedStatement {\n  accountIban',
+        'export interface ParsedStatement {\n  seqNumber: number | null\n  accountIban'
+    )
+    src = src.replace(
+        '  // Účet\n  const acctId',
+        "  // Pořadové číslo výpisu\n  const seqNumber: number | null = stmt['ElctrncSeqNb'] != null\n    ? Number(stmt['ElctrncSeqNb'])\n    : stmt['LglSeqNb'] != null ? Number(stmt['LglSeqNb']) : null\n\n  // Účet\n  const acctId"
+    )
+    src = src.replace(
+        '  return {\n    accountIban,',
+        '  return {\n    seqNumber,\n    accountIban,'
+    )
+    open(f, 'w').write(src)
+    print('Patch OK: camt053Parser seqNumber', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — seq_number v bank_statements
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+if 'seq_number' in src:
+    print('Patch SKIP: bank.ts seq_number already present', file=sys.stderr)
+else:
+    src = src.replace(
+        'const stmtInsertStatement = db.prepare(`\n  INSERT OR IGNORE INTO bank_statements\n    (filename, account_iban, account_number, period_from, period_to,\n     opening_balance, closing_balance, currency)\n  VALUES (@filename, @account_iban, @account_number, @period_from, @period_to,\n          @opening_balance, @closing_balance, @currency)\n`)',
+        "try { db.exec(`ALTER TABLE bank_statements ADD COLUMN seq_number INTEGER`) } catch {}\nconst stmtInsertStatement = db.prepare(`\n  INSERT OR IGNORE INTO bank_statements\n    (filename, account_iban, account_number, period_from, period_to,\n     opening_balance, closing_balance, currency, seq_number)\n  VALUES (@filename, @account_iban, @account_number, @period_from, @period_to,\n          @opening_balance, @closing_balance, @currency, @seq_number)\n`)"
+    )
+    open(f, 'w').write(src)
+    print('Patch OK: bank.ts seq_number', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — import splitXmlDocuments + multi-document upload
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+old_import = "import { parseCamt053 } from '../services/camt053Parser.js'"
+new_import = "import { parseCamt053, splitXmlDocuments } from '../services/camt053Parser.js'"
+old_loop = """        const existing = stmtGetStatementByFilename.get(filename) as any
+        if (existing) { skipped++; continue }
+
+        try {
+          const stmt = isFinsta(xmlContent) ? parseFinsta(xmlContent) : parseCamt053(xmlContent)
+
+          const insertStmt = db.transaction(() => {
+            stmtInsertStatement.run({
+              filename,
+              account_iban: stmt.accountIban || null,
+              account_number: stmt.accountNumber || null,
+              period_from: stmt.periodFrom || null,
+              period_to: stmt.periodTo || null,
+              opening_balance: stmt.openingBalance,
+              closing_balance: stmt.closingBalance,
+              currency: stmt.currency,
+            })
+            const saved = stmtGetStatementByFilename.get(filename) as any
+            for (const tx of stmt.transactions) {
+              stmtInsertTransaction.run({
+                statement_id: saved.id,
+                entry_ref: tx.entryRef || null,
+                transaction_date: tx.transactionDate || null,
+                value_date: tx.valueDate || null,
+                amount: tx.amount,
+                currency: tx.currency,
+                credit_debit: tx.creditDebit,
+                counterparty_name: tx.counterpartyName || null,
+                counterparty_iban: tx.counterpartyIban || null,
+                vs: tx.vs || null,
+                ks: tx.ks || null,
+                ss: tx.ss || null,
+                remittance_info: tx.remittanceInfo || null,
+              })
+            }
+            return saved.id
+          })
+
+          const statementId = insertStmt()
+          await autoMatchInvoices(pgSql, statementId)
+          imported++
+        } catch (parseErr: any) {
+          errors.push(`${filename}: ${parseErr.message}`)
+        }"""
+new_loop = """        const isFinstaFile = isFinsta(xmlContent)
+        const docs = isFinstaFile ? [xmlContent] : splitXmlDocuments(xmlContent)
+
+        for (let di = 0; di < docs.length; di++) {
+          const docFilename = docs.length > 1 ? `${filename}#${di + 1}` : filename
+          const existing = stmtGetStatementByFilename.get(docFilename) as any
+          if (existing) { skipped++; continue }
+
+          try {
+            const stmt = isFinstaFile ? parseFinsta(docs[di]) : parseCamt053(docs[di])
+
+            const insertStmt = db.transaction(() => {
+              stmtInsertStatement.run({
+                filename: docFilename,
+                account_iban: stmt.accountIban || null,
+                account_number: stmt.accountNumber || null,
+                period_from: stmt.periodFrom || null,
+                period_to: stmt.periodTo || null,
+                opening_balance: stmt.openingBalance,
+                closing_balance: stmt.closingBalance,
+                currency: stmt.currency,
+                seq_number: stmt.seqNumber ?? null,
+              })
+              const saved = stmtGetStatementByFilename.get(docFilename) as any
+              for (const tx of stmt.transactions) {
+                stmtInsertTransaction.run({
+                  statement_id: saved.id,
+                  entry_ref: tx.entryRef || null,
+                  transaction_date: tx.transactionDate || null,
+                  value_date: tx.valueDate || null,
+                  amount: tx.amount,
+                  currency: tx.currency,
+                  credit_debit: tx.creditDebit,
+                  counterparty_name: tx.counterpartyName || null,
+                  counterparty_iban: tx.counterpartyIban || null,
+                  vs: tx.vs || null,
+                  ks: tx.ks || null,
+                  ss: tx.ss || null,
+                  remittance_info: tx.remittanceInfo || null,
+                })
+              }
+              return saved.id
+            })
+
+            const statementId = insertStmt()
+            await autoMatchInvoices(pgSql, statementId)
+            imported++
+          } catch (parseErr: any) {
+            errors.push(`${docFilename}: ${parseErr.message}`)
+          }
+        }"""
+if old_import in src and old_loop in src:
+    src = src.replace(old_import, new_import).replace(old_loop, new_loop)
+    open(f, 'w').write(src)
+    print('Patch OK: bank.ts multi-document upload + splitXmlDocuments', file=sys.stderr)
+elif new_import in src and new_loop in src:
+    print('Patch SKIP: bank.ts multi-document already patched', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts multi-document — pattern not found', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — invoices-search pro proforma hledá v demo.proforma_invoice (SELECT *)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+old = "    const q = request.query as { q?: string; amount?: string; series?: string }\n\n    try {\n      const rows = await pgSql`\n        SELECT i.invoice_key, i.number, i.year, i.total, i.currency,\n               i.issued, i.maturity, i.settlement, c.company\n        FROM provider.invoice i\n        LEFT JOIN provider.company c ON i.company_key = c.company_key\n        WHERE i.cancellation IS NULL\n          ${q.series ? pgSql`AND i.series = ${Number(q.series)}` : pgSql`AND i.series != 5`}\n          ${q.q ? pgSql`AND (i.number::text ILIKE ${'%' + q.q + '%'} OR c.company ILIKE ${'%' + q.q + '%'})` : pgSql``}\n          ${q.amount ? pgSql`AND ABS(i.total - ${Number(q.amount)}) < 0.01` : pgSql``}\n        ORDER BY i.issued DESC\n        LIMIT 20\n      `\n      return reply.send(rows)"
+new = """    const q = request.query as { q?: string; amount?: string; series?: string; proforma?: string }
+
+    try {
+      let rows: any[]
+
+      if (q.proforma === 'true') {
+        // Hledáme v demo.proforma_invoice — vracíme SELECT * + company
+        // invoice_key aliasujeme na company_key, protože match ukládá company_key
+        const searchTerm = (q.q ?? '').trim()
+        if (/^5\\d{7,}$/.test(searchTerm)) {
+          // Plný proforma VS: '5' + series(1) + company_id_right(5) + číslo
+          const series = Number(searchTerm[1])
+          const companyIdSuffix = searchTerm.slice(2, 7)
+          const number = Number(searchTerm.slice(7))
+          rows = await pgSql`
+            SELECT p.company_key AS invoice_key, p.*, c.company, c.id AS company_id
+            FROM demo.proforma_invoice p
+            LEFT JOIN provider.company c ON p.company_key = c.company_key
+            WHERE p.series = ${series}
+              AND RIGHT(c.id::text, 5) = ${companyIdSuffix}
+              AND p.number = ${number}
+            ORDER BY p.issued DESC
+            LIMIT 20
+          `
+        } else {
+          rows = await pgSql`
+            SELECT p.company_key AS invoice_key, p.*, c.company, c.id AS company_id
+            FROM demo.proforma_invoice p
+            LEFT JOIN provider.company c ON p.company_key = c.company_key
+            ${searchTerm ? pgSql`WHERE (p.number::text ILIKE ${'%' + searchTerm + '%'} OR c.company ILIKE ${'%' + searchTerm + '%'})` : pgSql``}
+            ORDER BY p.issued DESC
+            LIMIT 20
+          `
+        }
+      } else {
+        rows = await pgSql`
+          SELECT i.invoice_key, i.number, i.year, i.total, i.currency,
+                 i.issued, i.maturity, i.settlement, c.company
+          FROM provider.invoice i
+          LEFT JOIN provider.company c ON i.company_key = c.company_key
+          WHERE i.cancellation IS NULL
+            ${q.series ? pgSql`AND i.series = ${Number(q.series)}` : pgSql`AND i.series != 5`}
+            ${q.q ? pgSql`AND (i.number::text ILIKE ${'%' + q.q + '%'} OR c.company ILIKE ${'%' + q.q + '%'})` : pgSql``}
+            ${q.amount ? pgSql`AND ABS(i.total - ${Number(q.amount)}) < 0.01` : pgSql``}
+          ORDER BY i.issued DESC
+          LIMIT 20
+        `
+      }
+      return reply.send(rows)"""
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: bank.ts invoices-search proforma → demo.proforma_invoice', file=sys.stderr)
+elif 'demo.proforma_invoice' in src:
+    print('Patch SKIP: bank.ts invoices-search proforma already patched', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts invoices-search — pattern not found', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — match endpoint podporuje proformu (company_key → matched_company_key)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+old = "    const { invoice_key } = request.body as { invoice_key: number }\n\n    try {\n      const [inv] = await pgSql`\n        SELECT invoice_key FROM provider.invoice WHERE invoice_key = ${invoice_key}\n      `\n      if (!inv) return reply.status(404).send({ error: 'Faktura nenalezena' })\n\n      db.prepare(`\n        UPDATE bank_transactions\n        SET matched_invoice_id = ?, matched_at = datetime('now')\n        WHERE id = ?\n      `).run(invoice_key, Number(id))"
+new = """    const body = request.body as { invoice_key?: number; company_key?: number }
+
+    try {
+      if (body.company_key != null) {
+        // Proforma záloha — ulož company_key do matched_company_key
+        const [co] = await pgSql`
+          SELECT company_key FROM provider.company WHERE company_key = ${body.company_key}
+        `
+        if (!co) return reply.status(404).send({ error: 'Firma nenalezena' })
+        db.prepare(`
+          UPDATE bank_transactions
+          SET matched_company_key = ?, matched_invoice_id = NULL, matched_at = datetime('now')
+          WHERE id = ?
+        `).run(body.company_key, Number(id))
+      } else {
+        const invoice_key = body.invoice_key!
+        const [inv] = await pgSql`
+          SELECT invoice_key FROM provider.invoice WHERE invoice_key = ${invoice_key}
+        `
+        if (!inv) return reply.status(404).send({ error: 'Faktura nenalezena' })
+        db.prepare(`
+          UPDATE bank_transactions
+          SET matched_invoice_id = ?, matched_company_key = NULL, matched_at = datetime('now')
+          WHERE id = ?
+        `).run(invoice_key, Number(id))
+      }"""
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: bank.ts match endpoint — proforma company_key', file=sys.stderr)
+elif 'body.company_key' in src:
+    print('Patch SKIP: bank.ts match — proforma already patched', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts match — pattern not found', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — company name lookup pro matched_company_key v /statements/:id a /transactions
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+old1 = """      const txWithInvoice = transactions.map(t => ({
+        ...t,
+        invoice_number:  invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:    invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:   invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_company:    invoiceMap[t.matched_invoice_id]?.company ?? null,
+        invoice_settlement: invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+      }))
+
+      return reply.send({ ...stmt, transactions: txWithInvoice })"""
+new1 = """      const matchedCompanyKeys = transactions.filter(t => t.matched_company_key).map(t => t.matched_company_key)
+      let companyMap: Record<number, any> = {}
+      if (matchedCompanyKeys.length > 0) {
+        const companies = await pgSql`
+          SELECT company_key, company FROM provider.company
+          WHERE company_key = ANY(${matchedCompanyKeys})
+        `
+        for (const co of companies) companyMap[co.company_key] = co
+      }
+
+      const txWithInvoice = transactions.map(t => ({
+        ...t,
+        invoice_number:     invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:       invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:      invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
+        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+      }))
+
+      return reply.send({ ...stmt, transactions: txWithInvoice })"""
+old2 = """      const result = transactions.map(t => ({
+        ...t,
+        invoice_number:  invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:    invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:   invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_company:    invoiceMap[t.matched_invoice_id]?.company ?? null,
+        invoice_settlement: invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+      }))"""
+new2 = """      const matchedCompanyKeys = transactions.filter(t => t.matched_company_key).map(t => t.matched_company_key)
+      let companyMap: Record<number, any> = {}
+      if (matchedCompanyKeys.length > 0) {
+        const companies = await pgSql`
+          SELECT company_key, company FROM provider.company
+          WHERE company_key = ANY(${matchedCompanyKeys})
+        `
+        for (const co of companies) companyMap[co.company_key] = co
+      }
+
+      const result = transactions.map(t => ({
+        ...t,
+        invoice_number:      invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:        invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:       invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
+        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+      }))"""
+changed = False
+if old1 in src:
+    src = src.replace(old1, new1)
+    changed = True
+if old2 in src:
+    src = src.replace(old2, new2)
+    changed = True
+if changed:
+    open(f, 'w').write(src)
+    print('Patch OK: bank.ts companyMap pro matched_company_key', file=sys.stderr)
+elif 'companyMap' in src:
+    print('Patch SKIP: bank.ts companyMap already patched', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts companyMap — pattern not found', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — autoMatchInvoices přidá auto-match pro proforma zálohy
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+old = """async function autoMatchInvoices(pgSql: any, statementId: number) {
+  const transactions = db.prepare(`
+    SELECT id, vs FROM bank_transactions
+    WHERE statement_id = ? AND matched_invoice_id IS NULL
+      AND vs IS NOT NULL AND vs != '' AND credit_debit = 'CRDT'
+      AND SUBSTR(vs, 1, 1) != '5'
+  `).all(statementId) as any[]
+
+  for (const tx of transactions) {
+    const [inv] = await pgSql`
+      SELECT i.invoice_key FROM provider.invoice i
+      JOIN provider.company c ON c.company_key = i.company_key
+      WHERE i.series::text = LEFT(${tx.vs}, 1)
+        AND RIGHT(c.id::text, LENGTH(${tx.vs}) - 5) = SUBSTRING(${tx.vs}, 2, LENGTH(${tx.vs}) - 5)
+        AND i.number = RIGHT(${tx.vs}, 4)::int
+        AND i.cancellation IS NULL
+      LIMIT 1
+    `
+    if (inv) {
+      db.prepare(`
+        UPDATE bank_transactions
+        SET matched_invoice_id = ?, matched_at = datetime('now')
+        WHERE id = ?
+      `).run(inv.invoice_key, tx.id)
+    }
+  }
+}"""
+new = """async function autoMatchInvoices(pgSql: any, statementId: number) {
+  // Regulérní faktury
+  const transactions = db.prepare(`
+    SELECT id, vs FROM bank_transactions
+    WHERE statement_id = ? AND matched_invoice_id IS NULL
+      AND vs IS NOT NULL AND vs != '' AND credit_debit = 'CRDT'
+      AND SUBSTR(vs, 1, 1) != '5'
+  `).all(statementId) as any[]
+
+  for (const tx of transactions) {
+    const [inv] = await pgSql`
+      SELECT i.invoice_key FROM provider.invoice i
+      JOIN provider.company c ON c.company_key = i.company_key
+      WHERE i.series::text = LEFT(${tx.vs}, 1)
+        AND RIGHT(c.id::text, LENGTH(${tx.vs}) - 5) = SUBSTRING(${tx.vs}, 2, LENGTH(${tx.vs}) - 5)
+        AND i.number = RIGHT(${tx.vs}, 4)::int
+        AND i.cancellation IS NULL
+      LIMIT 1
+    `
+    if (inv) {
+      db.prepare(`
+        UPDATE bank_transactions
+        SET matched_invoice_id = ?, matched_at = datetime('now')
+        WHERE id = ?
+      `).run(inv.invoice_key, tx.id)
+    }
+  }
+
+  // Proforma zálohy (VS začíná '5'): '5' + series(1) + company_id_right(5) + číslo
+  const proformaTxs = db.prepare(`
+    SELECT id, vs FROM bank_transactions
+    WHERE statement_id = ? AND matched_company_key IS NULL
+      AND vs IS NOT NULL AND LENGTH(vs) >= 8 AND credit_debit = 'CRDT'
+      AND SUBSTR(vs, 1, 1) = '5'
+  `).all(statementId) as any[]
+
+  for (const tx of proformaTxs) {
+    const series = Number(tx.vs[1])
+    const companyIdSuffix = tx.vs.slice(2, 7)
+    const number = Number(tx.vs.slice(7))
+    const [pf] = await pgSql`
+      SELECT p.company_key
+      FROM demo.proforma_invoice p
+      JOIN provider.company c ON c.company_key = p.company_key
+      WHERE p.series = ${series}
+        AND RIGHT(c.id::text, 5) = ${companyIdSuffix}
+        AND p.number = ${number}
+      LIMIT 1
+    `
+    if (pf) {
+      db.prepare(`
+        UPDATE bank_transactions
+        SET matched_company_key = ?, matched_at = datetime('now')
+        WHERE id = ?
+      `).run(pf.company_key, tx.id)
+    }
+  }
+}"""
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: bank.ts autoMatchInvoices — proforma zálohy', file=sys.stderr)
+elif 'proformaTxs' in src:
+    print('Patch SKIP: bank.ts autoMatch proforma already patched', file=sys.stderr)
+else:
+    print('Patch SKIP: bank.ts autoMatch proforma — pattern not found', file=sys.stderr)
+PYEOF
+
+# Patch: invoicing.ts — PUT /:id (editace) + POST /create (nová faktura, položky v měně faktury)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/invoicing.ts'
+src = open(f).read()
+if "app.put('/:id'," in src and "app.post('/create'," in src:
+    print('Patch SKIP: invoicing.ts PUT/:id + POST/create already present', file=sys.stderr)
+elif "// PUT /api/invoicing/:id/demands" in src:
+    anchor = "  // PUT /api/invoicing/:id/demands"
+    new_block = '''  // PUT /api/invoicing/:id — editace faktury (hlavicka + polozky v mene faktury)
+  app.put('/:id', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    const body = request.body as {
+      issued: string; fulfilment: string; maturity: string
+      settlement?: string | null; series: number; payment_method: string
+      currency: string; curr_value: number
+      proforma_number?: number | null; demand_notes?: number
+      items: InvoiceItem[]
+    }
+    try {
+      const rate = body.curr_value || 1
+      let priceLow = 0, priceHigh = 0, vatLow = 0, vatHigh = 0
+      let vatLowRate = 0, vatHighRate = 0
+      const calcItems: any[] = []
+      for (const item of body.items) {
+        const disc = (100 - item.discount) / 100
+        const priceSale = item.price_unit * disc
+        const price = priceSale * item.quantity
+        const vatAmt = Math.round(price * (item.vat_rate / 100) * 100) / 100
+        const priceTotal = price + vatAmt
+        if (item.vat_rate < 17) { vatLowRate = item.vat_rate; vatLow += vatAmt; priceLow += price }
+        else { vatHighRate = item.vat_rate; vatHigh += vatAmt; priceHigh += price }
+        calcItems.push({ name: item.name, priceUnit: item.price_unit, discount: item.discount, priceSale, quantity: item.quantity, price, vatRate: item.vat_rate, vat: vatAmt, priceTotal })
+      }
+      const priceSum = priceLow + priceHigh
+      const totalSum = priceSum + vatLow + vatHigh
+      await sql`
+        UPDATE provider.invoice SET
+          issued = ${body.issued}, fulfilment = ${body.fulfilment}, maturity = ${body.maturity},
+          settlement = ${body.settlement ?? null},
+          series = ${body.series}, payment_method = ${body.payment_method},
+          currency = ${body.currency}, rate = ${rate},
+          proforma_number = ${body.proforma_number ?? null},
+          demand_notes = ${body.demand_notes ?? 0},
+          price = ${priceSum}, price_low = ${priceLow}, price_high = ${priceHigh},
+          vat_low_rate = ${vatLowRate}, vat_low = ${vatLow},
+          vat_high_rate = ${vatHighRate}, vat_high = ${vatHigh},
+          total = ${totalSum},
+          curr_price = ${priceSum * rate}, curr_vat_low = ${vatLow * rate},
+          curr_vat_high = ${vatHigh * rate}, curr_total = ${totalSum * rate}
+        WHERE invoice_key = ${id}
+      `
+      await sql`DELETE FROM provider.invoice_item WHERE invoice_key = ${id}`
+      for (const ci of calcItems) {
+        await sql`
+          INSERT INTO provider.invoice_item
+            (invoice_key, name, price_unit, discount, price_sale, quantity, price, vat_rate, vat, price_total, currency)
+          VALUES
+            (${id}, ${ci.name}, ${ci.priceUnit}, ${ci.discount}, ${ci.priceSale},
+             ${ci.quantity}, ${ci.price}, ${ci.vatRate}, ${ci.vat}, ${ci.priceTotal}, ${body.currency})
+        `
+      }
+      const [updated] = await sql`SELECT * FROM provider.invoice WHERE invoice_key = ${id}`
+      return reply.send(updated)
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // POST /api/invoicing/create — jedna faktura, polozky v mene faktury
+  app.post('/create', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb, provider } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const body = request.body as {
+      company_key: number; issued: string; fulfilment: string; maturity: string
+      settlement?: string | null; series: number; payment_method: string
+      currency: string; curr_value: number
+      proforma_number?: number | null; demand_notes?: number
+      items: InvoiceItem[]
+    }
+    try {
+      const rate = body.curr_value || 1
+      let priceLow = 0, priceHigh = 0, vatLow = 0, vatHigh = 0
+      let vatLowRate = 0, vatHighRate = 0
+      const calcItems: any[] = []
+      for (const item of body.items) {
+        const disc = (100 - item.discount) / 100
+        const priceSale = item.price_unit * disc
+        const price = priceSale * item.quantity
+        const vatAmt = Math.round(price * (item.vat_rate / 100) * 100) / 100
+        if (item.vat_rate < 17) { vatLowRate = item.vat_rate; vatLow += vatAmt; priceLow += price }
+        else { vatHighRate = item.vat_rate; vatHigh += vatAmt; priceHigh += price }
+        calcItems.push({ name: item.name, priceUnit: item.price_unit, discount: item.discount,
+          priceSale, quantity: item.quantity, price, vatRate: item.vat_rate, vat: vatAmt, priceTotal: price + vatAmt })
+      }
+      const priceSum = priceLow + priceHigh
+      const totalSum = priceSum + vatLow + vatHigh
+      const year = new Date(body.issued).getFullYear()
+      const maxResult = await sql`
+        SELECT MAX(number) AS max_num FROM provider.invoice
+        WHERE year = ${year} AND currency = ${body.currency} AND provider = ${provider}
+      `
+      const nextNum = maxResult[0]?.max_num ? Number(maxResult[0].max_num) + 1 : (body.currency === 'CZK' ? 1 : 9000)
+      const [inv] = await sql`
+        INSERT INTO provider.invoice
+          (company_key, year, number, provider, series, issued, maturity, fulfilment,
+           price, price_low, price_high, vat_low_rate, vat_low, vat_high_rate, vat_high,
+           total, curr_price, curr_vat_low, curr_vat_high, curr_total,
+           payment_method, currency, rate, demand_notes, proforma_number, settlement)
+        VALUES
+          (${body.company_key}, ${year}, ${nextNum}, ${provider}, ${body.series},
+           ${body.issued}, ${body.maturity}, ${body.fulfilment},
+           ${priceSum}, ${priceLow}, ${priceHigh}, ${vatLowRate}, ${vatLow}, ${vatHighRate}, ${vatHigh},
+           ${totalSum}, ${priceSum * rate}, ${vatLow * rate}, ${vatHigh * rate}, ${totalSum * rate},
+           ${body.payment_method}, ${body.currency}, ${rate},
+           ${body.demand_notes ?? 0}, ${body.proforma_number ?? null}, ${body.settlement ?? null})
+        RETURNING invoice_key
+      `
+      for (const ci of calcItems) {
+        await sql`
+          INSERT INTO provider.invoice_item
+            (invoice_key, name, price_unit, discount, price_sale, quantity, price, vat_rate, vat, price_total, currency)
+          VALUES
+            (${inv.invoice_key}, ${ci.name}, ${ci.priceUnit}, ${ci.discount}, ${ci.priceSale},
+             ${ci.quantity}, ${ci.price}, ${ci.vatRate}, ${ci.vat}, ${ci.priceTotal}, ${body.currency})
+        `
+      }
+      return reply.code(201).send({ invoice_key: inv.invoice_key })
+    } catch (err: any) {
+      return reply.code(500).send({ error: err.message })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // PUT /api/invoicing/:id/demands'''
+    open(f, 'w').write(src.replace(anchor, new_block))
+    print('Patch OK: invoicing.ts PUT/:id + POST/create', file=sys.stderr)
+else:
+    print('Patch SKIP: invoicing.ts anchor not found', file=sys.stderr)
+PYEOF
+
+# Patch: invoicing.ts — přejmenuj series
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/invoicing.ts'
+src = open(f).read()
+old = "  1: '1-Internet', 2: '2-Modem Euro', 3: '3-Modem CZ', 4: '4-INFAX',\n  5: '-----------', 6: '6-Software', 7: '7-SMS', 8: '8-Školení', 9: '9-Reklama',"
+new = "  1: '1-Spedice', 2: '2-Modem Euro', 3: '3-Modem CZ', 4: '4-TM+SIM',\n  5: '-----------', 6: '6-Hardware', 7: '7-SMS', 8: '8-Doprava', 9: '9-Reklama',"
+if old in src:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: invoicing.ts series names', file=sys.stderr)
+else:
+    print('Patch SKIP: series names already patched', file=sys.stderr)
+PYEOF
+
+# Patch: statistics.ts — přidej orders-monthly endpoint (ta.obligation)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/statistics.ts'
+src = open(f).read()
+anchor = '  // GET /api/statistics/lent-access-stats'
+insert = '''  // GET /api/statistics/orders-monthly — zakázky dle měsíce (posledních 36 měsíců)
+  app.get('/orders-monthly', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const rows = await sql`
+        SELECT to_char(date_trunc('month', created_time), 'YYYY-MM') AS month,
+               count(*)::int AS count
+        FROM ta.obligation_base
+        WHERE created_time >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+        GROUP BY date_trunc('month', created_time)
+        ORDER BY month
+      `
+      const byMonth = {}
+      for (const r of rows) byMonth[r.month] = r.count
+      const result = []
+      for (let i = 35; i >= 0; i--) {
+        const d = new Date()
+        d.setDate(1)
+        d.setMonth(d.getMonth() - i)
+        const key = d.toISOString().slice(0, 7)
+        result.push({ month: key, count: byMonth[key] ?? 0 })
+      }
+      return reply.send(result)
+    } finally {
+      await sql.end()
+    }
+  })
+
+'''
+if '/orders-monthly' not in src and anchor in src:
+    open(f, 'w').write(src.replace(anchor, insert + anchor))
+    print('Patch OK: statistics.ts orders-monthly', file=sys.stderr)
+else:
+    print('Patch SKIP: orders-monthly already present', file=sys.stderr)
+PYEOF
+
+# Patch: statistics.ts — přidej lent-access-stats endpoint (min. 1x předplatili + trvalí uživatelé)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/statistics.ts'
+src = open(f).read()
+anchor = '  // GET /api/statistics/overdue-companies — firmy s pohledávkami po splatnosti'
+insert = '''  // GET /api/statistics/lent-access-stats — min. 1x předplatili + trvalí uživatelé (36 měsíců)
+  app.get('/lent-access-stats', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const [row] = await sql`
+        SELECT
+          count(*) FILTER (WHERE admittance_date IS NOT NULL
+                             AND admittance_date >= prog_lent_date + INTERVAL '45 days')::int AS d45,
+          count(*) FILTER (WHERE prog_lent_date <= CURRENT_DATE - INTERVAL '45 days'
+                             AND admittance_date > CURRENT_DATE)::int                         AS trvali
+        FROM provider.company_detail
+        WHERE prog_lent_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+          AND prog_lent_date IS NOT NULL
+      `
+      return reply.send(row)
+    } finally {
+      await sql.end()
+    }
+  })
+
+'''
+if '/lent-access-stats' not in src and anchor in src:
+    open(f, 'w').write(src.replace(anchor, insert + anchor))
+    print('Patch OK: statistics.ts lent-access-stats', file=sys.stderr)
+else:
+    print('Patch SKIP: lent-access-stats already present or anchor not found', file=sys.stderr)
+PYEOF
+
+# Patch: statistics.ts — orders-monthly přidej digital (web_origin)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/statistics.ts'
+src = open(f).read()
+old = """        SELECT to_char(date_trunc('month', created_time), 'YYYY-MM') AS month,
+               count(*)::int AS count
+        FROM ta.obligation_base
+        WHERE created_time >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+        GROUP BY date_trunc('month', created_time)
+        ORDER BY month"""
+new = """        SELECT to_char(date_trunc('month', created_time), 'YYYY-MM') AS month,
+               count(*)::int AS count,
+               count(*) FILTER (WHERE web_origin = 'D')::int AS digital
+        FROM ta.obligation_base
+        WHERE created_time >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+        GROUP BY date_trunc('month', created_time)
+        ORDER BY month"""
+old2 = "      const byMonth: Record<string, number> = {}\n      for (const r of rows) byMonth[r.month] = r.count\n      const result = []\n      for (let i = 35; i >= 0; i--) {\n        const d = new Date()\n        d.setDate(1)\n        d.setMonth(d.getMonth() - i)\n        const key = d.toISOString().slice(0, 7)\n        result.push({ month: key, count: byMonth[key] ?? 0 })\n      }"
+new2 = "      const byMonth: Record<string, { count: number; digital: number }> = {}\n      for (const r of rows) byMonth[r.month] = { count: r.count, digital: r.digital }\n      const result = []\n      for (let i = 35; i >= 0; i--) {\n        const d = new Date()\n        d.setDate(1)\n        d.setMonth(d.getMonth() - i)\n        const key = d.toISOString().slice(0, 7)\n        result.push({ month: key, count: byMonth[key]?.count ?? 0, digital: byMonth[key]?.digital ?? 0 })\n      }"
+changed = False
+if old in src:
+    src = src.replace(old, new); changed = True
+if old2 in src:
+    src = src.replace(old2, new2); changed = True
+if changed:
+    open(f, 'w').write(src)
+    print('Patch OK: orders-monthly digital field', file=sys.stderr)
+else:
+    print('Patch SKIP: orders-monthly digital already present', file=sys.stderr)
+PYEOF
+
+# Patch: statistics.ts — přidej invoice-base-monthly endpoint (ta.invoice_base)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/statistics.ts'
+src = open(f).read()
+anchor = '  // GET /api/statistics/lent-access-stats'
+insert = """  // GET /api/statistics/invoice-base-monthly — faktury dle měsíce (posledních 36 měsíců)
+  app.get('/invoice-base-monthly', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const rows = await sql`
+        SELECT to_char(date_trunc('month', issued), 'YYYY-MM') AS month,
+               count(*) FILTER (WHERE type = 'I')::int AS issued,
+               count(*) FILTER (WHERE type = 'R')::int AS received
+        FROM ta.invoice_base
+        WHERE issued >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+          AND cancelation IS NULL
+        GROUP BY date_trunc('month', issued)
+        ORDER BY month
+      `
+      const byMonth = {}
+      for (const r of rows) byMonth[r.month] = { issued: r.issued, received: r.received }
+      const result = []
+      for (let i = 35; i >= 0; i--) {
+        const d = new Date()
+        d.setDate(1)
+        d.setMonth(d.getMonth() - i)
+        const key = d.toISOString().slice(0, 7)
+        result.push({ month: key, issued: byMonth[key]?.issued ?? 0, received: byMonth[key]?.received ?? 0 })
+      }
+      return reply.send(result)
+    } finally {
+      await sql.end()
+    }
+  })
+
+"""
+if '/invoice-base-monthly' not in src and anchor in src:
+    open(f, 'w').write(src.replace(anchor, insert + anchor))
+    print('Patch OK: invoice-base-monthly endpoint', file=sys.stderr)
+else:
+    print('Patch SKIP: invoice-base-monthly already present', file=sys.stderr)
+PYEOF
+
+# Patch: statistics.ts — přidej order-base-monthly endpoint (ta.order_base)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/statistics.ts'
+src = open(f).read()
+anchor = '  // GET /api/statistics/lent-access-stats'
+insert = """  // GET /api/statistics/order-base-monthly — objednávky dle měsíce (posledních 36 měsíců)
+  app.get('/order-base-monthly', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const rows = await sql`
+        SELECT to_char(date_trunc('month', created_time), 'YYYY-MM') AS month,
+               count(*)::int AS count,
+               count(*) FILTER (WHERE accepted_time IS NOT NULL)::int AS accepted
+        FROM ta.order_base
+        WHERE created_time >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+        GROUP BY date_trunc('month', created_time)
+        ORDER BY month
+      `
+      const byMonth = {}
+      for (const r of rows) byMonth[r.month] = { count: r.count, accepted: r.accepted }
+      const result = []
+      for (let i = 35; i >= 0; i--) {
+        const d = new Date()
+        d.setDate(1)
+        d.setMonth(d.getMonth() - i)
+        const key = d.toISOString().slice(0, 7)
+        result.push({ month: key, count: byMonth[key]?.count ?? 0, accepted: byMonth[key]?.accepted ?? 0 })
+      }
+      return reply.send(result)
+    } finally {
+      await sql.end()
+    }
+  })
+
+"""
+if '/order-base-monthly' not in src and anchor in src:
+    open(f, 'w').write(src.replace(anchor, insert + anchor))
+    print('Patch OK: order-base-monthly endpoint', file=sys.stderr)
+else:
+    print('Patch SKIP: order-base-monthly already present', file=sys.stderr)
 PYEOF
 
 # Spusť backend z patchované kopie

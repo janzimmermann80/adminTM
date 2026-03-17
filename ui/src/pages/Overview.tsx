@@ -9,6 +9,7 @@ import {
   getStatsClaims,
   getStatsDiaryByOwner,
   getStatsLentMonthly,
+  getStatsLentAccessStats,
   getDiaryUpcoming,
   getStatsExpiredAccess,
   getStatsOverdueCompanies,
@@ -200,6 +201,7 @@ export const Overview = () => {
   const [diaryBy, setDiaryBy]           = useState<any[]>([])
   const [diary, setDiary]               = useState<any[]>([])
   const [lent, setLent]                 = useState<any[]>([])
+  const [lentAccess, setLentAccess]     = useState<any>(null)
   const [loading, setLoading]           = useState(true)
   const [showExpired, setShowExpired]       = useState(false)
   const [expiredList, setExpiredList]       = useState<any[] | null>(null)
@@ -220,6 +222,7 @@ export const Overview = () => {
       getStatsClaims().then(setClaims),
       getStatsDiaryByOwner().then(setDiaryBy),
       getStatsLentMonthly().then(setLent),
+      getStatsLentAccessStats().then(setLentAccess),
       initials ? getDiaryUpcoming(initials).then((r: any) => setDiary(r.data ?? [])) : Promise.resolve(),
     ]).finally(() => setLoading(false))
   }, [])
@@ -518,7 +521,27 @@ export const Overview = () => {
           <h2 className="text-sm font-semibold text-gray-700">Registrace za posledních 36 měsíců</h2>
           <span className="text-xs text-gray-400">{lent.reduce((s, m) => s + m.count, 0)} celkem</span>
         </div>
-        <LentChart data={lent} />
+        <div className="flex gap-6 items-start">
+          {lentAccess && (
+            <div className="shrink-0">
+              <table className="text-sm">
+                <tbody className="divide-y divide-gray-100">
+                  <tr>
+                    <td className="py-2 pr-6 text-gray-500 text-xs">Min. 1x předplatili</td>
+                    <td className="py-2 text-right font-semibold text-gray-800 tabular-nums">{lentAccess.d45}</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2 pr-6 text-gray-500 text-xs">Trvalí uživatelé</td>
+                    <td className="py-2 text-right font-semibold text-gray-800 tabular-nums">{lentAccess.trvali}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <LentChart data={lent} />
+          </div>
+        </div>
       </div>
 
       {/* Bottom row */}
