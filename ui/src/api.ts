@@ -156,6 +156,9 @@ export const deleteNote = (id: string, nid: string) => del<any>(`/companies/${id
 // online log
 export const getOnlineLog = (id: string) => get<any[]>(`/companies/${id}/online-log`)
 
+export const getImpersonateUrl = (id: string, type: string, username: string) =>
+  get<{ url: string }>(`/companies/${id}/impersonate?type=${encodeURIComponent(type)}&username=${encodeURIComponent(username)}`)
+
 // diary
 export const getDiary = (companyKey: string) =>
   get<{ data: any[] }>(`/diary?company_key=${companyKey}&limit=100`)
@@ -234,4 +237,57 @@ export const uploadBankXml = (files: FileList | File[]) => {
     if (!r.ok) { const t = await r.text(); throw new Error(JSON.parse(t).error ?? t) }
     return r.json() as Promise<{ imported: number; skipped: number; errors: string[] }>
   })
+}
+
+
+// ── Queries ───────────────────────────────────────────────────────────────────
+
+export type ReportsScheduleRow = {
+  schedule_id: number
+  company_key: number
+  type: string
+  title: string | null
+  emails: string[] | null
+  schedule_day: number[] | null
+  schedule_month: number[] | null
+  schedule_weekday: number[] | null
+  created_time: string | null
+  generated_time: string | null
+  generation_duration: number | null
+  generation_error: string | null
+  period_from: string | null
+  period_to: string | null
+  one_time: boolean | null
+  updated_time: string | null
+  generation_started: string | null
+  drv_keys: number[] | null
+  script_input: unknown | null
+}
+
+export const getReportsSchedule = (params: { company_key?: string; type?: string; one_time?: string; limit?: number; offset?: number } = {}) => {
+  const p = new URLSearchParams()
+  if (params.company_key) p.set('company_key', params.company_key)
+  if (params.type) p.set('type', params.type)
+  if (params.one_time) p.set('one_time', params.one_time)
+  if (params.limit) p.set('limit', String(params.limit))
+  if (params.offset) p.set('offset', String(params.offset))
+  return get<ReportsScheduleRow[]>(`/queries/reports-schedule${p.toString() ? '?' + p : ''}`)
+}
+
+export type AiPromptRow = {
+  prompt_id: number
+  company_key: number | null
+  tin: string | null
+  company_name: string | null
+  type: string | null
+  prompt: string | null
+  updated_time: string | null
+}
+
+export const getAiPrompt = (params: { company_key?: string; type?: string; limit?: number } = {}) => {
+  const p = new URLSearchParams()
+  if (params.company_key) p.set('company_key', params.company_key)
+  if (params.type) p.set('type', params.type)
+  if (params.limit) p.set('limit', String(params.limit))
+  return get<AiPromptRow[]>(`/queries/ai-prompt${p.toString() ? '?' + p : ''}`)
 }

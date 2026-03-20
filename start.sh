@@ -488,7 +488,8 @@ new = """        const smsLogin = process.env.SMS_BRANA_LOGIN ?? ''
         const { createHash } = await import('crypto')
         const now = new Date()
         const pad = (n: number) => String(n).padStart(2, '0')
-        const time = `${now.getUTCFullYear()}${pad(now.getUTCMonth()+1)}${pad(now.getUTCDate())}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`
+        const pragueNow = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Prague' }))
+        const time = `${pragueNow.getFullYear()}${pad(pragueNow.getMonth()+1)}${pad(pragueNow.getDate())}T${pad(pragueNow.getHours())}${pad(pragueNow.getMinutes())}${pad(pragueNow.getSeconds())}`
         const salt = Math.random().toString(36).slice(2, 10)
         const auth = createHash('md5').update(smsPass + time + salt).digest('hex')
         const params = new URLSearchParams({
@@ -499,6 +500,7 @@ new = """        const smsLogin = process.env.SMS_BRANA_LOGIN ?? ''
           action: 'send_sms',
           number: body.to,
           message: smsText,
+          sender_id: '36200',
         })
         const resp = await fetch(`https://api.smsbrana.cz/smsconnect/http.php?${params}`)
         const xml = await resp.text()
@@ -2198,6 +2200,128 @@ if '/order-base-monthly' not in src and anchor in src:
     print('Patch OK: order-base-monthly endpoint', file=sys.stderr)
 else:
     print('Patch SKIP: order-base-monthly already present', file=sys.stderr)
+PYEOF
+
+# Patch: vytvoř queries.ts — výstupy / dotazy (reports_schedule + ai_prompt)
+python3 - <<'PYEOF'
+import sys, os
+f = '/services/admin-data/patched/src/routes/queries.ts'
+content = """import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import { getUserSql } from '../db/userSql.js'
+
+export async function queriesRoutes(app: FastifyInstance) {
+
+  // GET /api/queries/reports-schedule?company_key=&type=&one_time=&limit=
+  app.get('/reports-schedule', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const q = request.query as { company_key?: string; type?: string; one_time?: string; limit?: string; offset?: string }
+    const lim = Math.min(Number(q.limit ?? 100), 1000)
+    const off = Math.max(Number(q.offset ?? 0), 0)
+
+    try {
+      const rows = await sql\`
+        SELECT *
+        FROM provider.reports_schedule
+        WHERE 1=1
+          \${q.company_key ? sql\`AND company_key = \${Number(q.company_key)}\` : sql\`\`}
+          \${q.type ? sql\`AND type = \${q.type}\` : sql\`\`}
+          \${q.one_time === 'true' ? sql\`AND one_time = true\`
+            : q.one_time === 'false' ? sql\`AND (one_time = false OR one_time IS NULL)\`
+            : sql\`\`}
+        ORDER BY created_time DESC
+        LIMIT \${lim} OFFSET \${off}
+      \`
+      return reply.send(rows)
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/queries/ai-prompt?company_key=&type=&limit=
+  app.get('/ai-prompt', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const q = request.query as { company_key?: string; type?: string; limit?: string }
+    const lim = Math.min(Number(q.limit ?? 100), 1000)
+
+    try {
+      const rows = await sql\`
+        SELECT *
+        FROM ta.ai_prompt
+        WHERE 1=1
+          \${q.company_key ? sql\`AND company_key = \${Number(q.company_key)}\` : sql\`\`}
+          \${q.type ? sql\`AND type = \${q.type}\` : sql\`\`}
+        ORDER BY updated_time DESC
+        LIMIT \${lim}
+      \`
+      return reply.send(rows)
+    } finally {
+      await sql.end()
+    }
+  })
+}
+"""
+open(f, 'w').write(content)
+print('Patch OK: queries.ts created/updated', file=sys.stderr)
+PYEOF
+
+# Patch: index.ts — registrace queriesRoutes
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/index.ts'
+src = open(f).read()
+if 'queriesRoutes' not in src:
+    src = src.replace(
+        "import { workersRoutes } from './routes/workers.js'",
+        "import { workersRoutes } from './routes/workers.js'\nimport { queriesRoutes } from './routes/queries.js'"
+    )
+    src = src.replace(
+        "await app.register(workersRoutes, { prefix: '/api/workers' })",
+        "await app.register(workersRoutes, { prefix: '/api/workers' })\nawait app.register(queriesRoutes, { prefix: '/api/queries' })"
+    )
+    open(f, 'w').write(src)
+    print('Patch OK: index.ts — queriesRoutes registered', file=sys.stderr)
+else:
+    print('Patch SKIP: queriesRoutes already in index.ts', file=sys.stderr)
+PYEOF
+
+# Patch: companies/index.ts — impersonation endpoint
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+insert = """
+  // GET /api/companies/:id/impersonate?type=app|devel&username=...
+  app.get('/:id/impersonate', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { type, username } = request.query as { type?: string; username?: string }
+    if (!username) return reply.code(400).send({ error: 'username required' })
+    const loginBase = type === 'devel'
+      ? 'https://app2.truckmanager.eu/#/(left:auto-login)'
+      : 'https://app.truckmanager.eu/#/(left:auto-login)'
+    try {
+      const rows = await sql`SELECT provider.login_auth_code(${username}) AS code`
+      if (!rows[0]?.code) return reply.code(404).send({ error: 'Invalid username' })
+      return reply.send({ url: `${loginBase}?code=${rows[0].code}` })
+    } finally {
+      await sql.end()
+    }
+  })
+"""
+marker = "\n}"
+if '/:id/impersonate' not in src:
+    open(f, 'w').write(src.rstrip().rstrip('}') + insert + '}\n')
+    print('Patch OK: companies/index.ts — impersonate endpoint added', file=sys.stderr)
+else:
+    print('Patch SKIP: impersonate already in companies/index.ts', file=sys.stderr)
 PYEOF
 
 # Spusť backend z patchované kopie
