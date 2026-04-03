@@ -25,7 +25,7 @@ export const formatNumber = (n: number | null | undefined, decimals = 2): string
   if (n == null) return ''
   const parts = Number(n).toFixed(decimals).split('.')
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0')
-  return parts.join('.')
+  return parts.join(',')
 }
 
 export const formatCurrency = (amount: number | null | undefined, currency = 'CZK'): string => {

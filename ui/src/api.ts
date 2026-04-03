@@ -120,6 +120,7 @@ export const deleteInvoice = (id: string) =>
 export const getInvoicingMeta = () =>
   get<{ series: Record<string, string>; payment_methods: Record<string, string> }>('/invoicing/meta')
 export const getInvoicingServices = () => get<any[]>('/invoicing/services')
+export const getCnbRate = (code: string) => get<{ code: string; rate: number; date: string }>(`/invoicing/cnb-rate/${code}`)
 export const updateInvoice = (id: string, body: any) => put<any>(`/invoicing/${id}`, body)
 export const createInvoiceSingle = (body: any) => post<any>('/invoicing/create', body)
 
@@ -145,6 +146,10 @@ export const deleteDriver = (id: string, did: string) => del<any>(`/companies/${
 // simcards
 export const getSimcards = (id: string) => get<any[]>(`/companies/${id}/simcards`)
 export const getSimcardTariffs = (id: string) => get<any[]>(`/companies/${id}/simcard-tariffs`)
+
+// access
+export const extendAccess = (id: string, months: number) =>
+  post<{ admittance_date: string }>(`/companies/${id}/extend-access`, { months })
 
 // notes
 export const getNotes = (id: string) => get<any[]>(`/companies/${id}/notes`)

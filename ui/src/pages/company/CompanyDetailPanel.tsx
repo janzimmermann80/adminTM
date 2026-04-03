@@ -96,37 +96,25 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
         )}
 
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 px-6 py-5">
-          <div className="flex flex-wrap items-start gap-4 justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-1">
-                <span className="text-gray-300 font-mono text-sm">{companyKey}</span>
-                <span className="text-gray-400 font-mono text-sm">{company.id}</span>
-                {company.tariff_name && (
-                  <span className="bg-teal-100 text-[#0a6b6b] text-xs rounded-full px-2.5 py-0.5 font-medium">
-                    {company.tariff_name}
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold text-gray-900 flex items-baseline gap-3 flex-wrap">
+              <span>{company.company}</span>
+              <span className="text-gray-400">{company.id}</span>
+              {company.admittance_date && (() => {
+                const valid = company.admittance_date >= new Date().toISOString().slice(0, 10)
+                return (
+                  <span className={valid ? 'text-green-600' : 'text-red-500'}>
+                    {formatDate(company.admittance_date)}
                   </span>
-                )}
-                {company.country && (
-                  <span className="bg-gray-100 text-gray-600 text-xs rounded px-2 py-0.5 font-mono">
-                    {company.country}
-                  </span>
-                )}
-              </div>
-              <h1 className="text-2xl font-bold text-gray-900">{company.company}</h1>
-              <p className="text-gray-500 text-sm mt-1">
-                {[company.street, company.zip, company.city].filter(Boolean).join(', ')}
-              </p>
-              {summary && (
-                <div className="flex flex-wrap gap-3 mt-3">
-                  <StatBadge label="Auta"       active={summary.cars.active}        total={summary.cars.total}        activeLabel="7 dní" />
-                  <StatBadge label="SIM"        active={summary.sims.active}        total={summary.sims.total}        activeLabel="aktivní" />
-                  <StatBadge label="Zakázky"    active={summary.obligations.recent} total={summary.obligations.total} activeLabel="7 dní" />
-                  <StatBadge label="Faktury"    active={summary.invoices.recent}    total={summary.invoices.total}    activeLabel="7 dní" />
-                  <StatBadge label="Objednávky" active={summary.orders.recent}      total={summary.orders.total}      activeLabel="7 dní" />
-                </div>
+                )
+              })()}
+              {company.tariff_name && (
+                <span className="bg-teal-100 text-[#0a6b6b] text-xs rounded-full px-2.5 py-0.5 font-medium self-center">
+                  {company.tariff_name}
+                </span>
               )}
-            </div>
-            <div className="flex items-start gap-3">
+            </h1>
+            <div className="ml-auto flex items-center gap-3 shrink-0">
               <div className="text-right text-xs text-gray-400">
                 <p>Naposledy změněno</p>
                 <p className="font-medium text-gray-600">{formatDate(company.last_modif)}</p>
@@ -144,6 +132,18 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
               )}
             </div>
           </div>
+          <p className="text-gray-500 text-sm mt-1">
+            {[companyKey, company.street, company.zip, company.city, company.country].filter(Boolean).join(' · ')}
+          </p>
+          {summary && (
+            <div className="flex flex-wrap gap-3 mt-3">
+              <StatBadge label="Auta"       active={summary.cars.active}        total={summary.cars.total}        activeLabel="7 dní" />
+              <StatBadge label="SIM"        active={summary.sims.active}        total={summary.sims.total}        activeLabel="aktivní" />
+              <StatBadge label="Zakázky"    active={summary.obligations.recent} total={summary.obligations.total} activeLabel="7 dní" />
+              <StatBadge label="Faktury"    active={summary.invoices.recent}    total={summary.invoices.total}    activeLabel="7 dní" />
+              <StatBadge label="Objednávky" active={summary.orders.recent}      total={summary.orders.total}      activeLabel="7 dní" />
+            </div>
+          )}
         </div>
       </div>
 

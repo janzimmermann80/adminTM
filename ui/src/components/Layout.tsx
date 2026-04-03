@@ -82,6 +82,14 @@ const IconAI = () => (
   </svg>
 )
 
+const IconQueries = () => (
+  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+    <ellipse cx="12" cy="6" rx="8" ry="3" strokeLinecap="round" strokeLinejoin="round" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 6v6c0 1.657 3.582 3 8 3s8-1.343 8-3V6" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 12v6c0 1.657 3.582 3 8 3s8-1.343 8-3v-6" />
+  </svg>
+)
+
 const IconBank = () => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M3 6l9-3 9 3M3 6v12m18-12v12M3 18h18M12 3v3m0 12v3M6 9h.01M6 13h.01M18 9h.01M18 13h.01M12 9h.01M12 13h.01" />
@@ -107,6 +115,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Kampaně',         icon: <IconCampaign />,   disabled: true },
   { label: 'AI asistent',     icon: <IconAI />,         disabled: true },
   { to: '/bank',              label: 'Banka',           icon: <IconBank /> },
+  { to: '/queries',           label: 'Dotazy',          icon: <IconQueries /> },
 ]
 
 export const Layout = ({ children }: { children: React.ReactNode }) => {

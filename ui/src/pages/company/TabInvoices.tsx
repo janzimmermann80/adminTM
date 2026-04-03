@@ -13,10 +13,18 @@ import { INVOICE_SERIES_LABELS } from '../../types'
 
 interface Props { companyKey: string; companyId?: string }
 
+// DD.MM.YY — krátký formát pro tabulku faktur
+const fmtD = (d: string | null | undefined): string => {
+  if (!d) return ''
+  const s = d.includes('T') ? new Date(d).toISOString().slice(0, 10) : d.slice(0, 10)
+  const [y, m, day] = s.split('-')
+  return `${day}.${m}.${y.slice(2)}`
+}
+
 const LIMIT = 10
 
 // ── Email modal ──────────────────────────────────────────────────────────────
-function InvoiceEmailModal({ inv, companyId, companyKey, onClose, onSent }: {
+export function InvoiceEmailModal({ inv, companyId, companyKey, onClose, onSent }: {
   inv: Invoice
   companyId: string
   companyKey: string
@@ -190,6 +198,8 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
     finally { setPrinting(null) }
   }
 
+  const hasStorno = invoices.some(inv => inv.cancellation)
+
   if (loading && !invoices.length) return <div className="flex justify-center py-12"><Spinner size={8}/></div>
 
   return (
@@ -209,12 +219,12 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
               <th className="px-4 py-3 font-medium hidden sm:table-cell">Proforma</th>
               <th className="px-4 py-3 font-medium hidden sm:table-cell">Série</th>
               <th className="px-4 py-3 font-medium">Vydáno</th>
-              <th className="px-4 py-3 font-medium hidden md:table-cell">Splnění</th>
-              <th className="px-4 py-3 font-medium hidden md:table-cell">Splatnost</th>
-              <th className="px-4 py-3 font-medium hidden sm:table-cell">Uhrazeno</th>
+              <th className="px-4 py-3 font-medium hidden md:table-cell">Plnění</th>
+              <th className="px-4 py-3 font-medium hidden md:table-cell">Splatná</th>
+              <th className="px-4 py-3 font-medium hidden sm:table-cell">Úhrada</th>
               <th className="px-4 py-3 font-medium text-right">Celkem</th>
               <th className="px-4 py-3 font-medium text-right hidden lg:table-cell">Základ</th>
-              <th className="px-4 py-3 font-medium hidden lg:table-cell">Storno</th>
+              {hasStorno && <th className="px-4 py-3 font-medium">Storno</th>}
               <th className="px-4 py-3 w-32"></th>
             </tr>
           </thead>
@@ -236,35 +246,42 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
                       {INVOICE_SERIES_LABELS[inv.series] ?? inv.series}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{formatDate(inv.issued)}</td>
-                  <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{formatDate(inv.fulfilment)}</td>
-                  <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{formatDate(inv.maturity)}</td>
+                  <td className="px-4 py-3 text-gray-600">{fmtD(inv.issued)}</td>
+                  <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{fmtD(inv.fulfilment)}</td>
+                  <td className="px-4 py-3 text-gray-600 hidden md:table-cell">{fmtD(inv.maturity)}</td>
                   <td className="px-4 py-3 hidden sm:table-cell">
-                    {isSettled ? (
-                      <span className="flex items-center gap-1 text-green-600 text-xs">
-                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/>
-                        </svg>
-                        {formatDate(inv.settlement)}
-                      </span>
-                    ) : (
+                    {isSettled ? (() => {
+                      const late = inv.maturity && inv.settlement
+                        ? (new Date(inv.settlement).getTime() - new Date(inv.maturity).getTime()) / 86400000
+                        : 0
+                      return (
+                        <span className={`text-gray-600 ${late > 14 ? 'text-red-600' : 'text-green-600'}`}>
+                          {fmtD(inv.settlement)}
+                        </span>
+                      )
+                    })() : (
                       <span className="text-orange-500 text-xs font-medium">Neuhrazeno</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right font-medium tabular-nums">
-                    {formatNumber(inv.total)} {inv.currency !== 'CZK' ? inv.currency : 'Kč'}
-                    {inv.curr_total != null && inv.currency !== 'CZK' && (
-                      <div className="text-xs text-gray-400">{formatNumber(inv.curr_total)} Kč</div>
-                    )}
+                  <td className="px-4 py-3 text-right font-medium tabular-nums whitespace-nowrap">
+                    {inv.currency !== 'CZK' && inv.curr_total != null
+                      ? <>{formatNumber(inv.curr_total)} {inv.currency}<div className="text-xs text-gray-400 whitespace-nowrap">{formatNumber(inv.total)} Kč</div></>
+                      : <>{formatNumber(inv.total)} Kč</>
+                    }
                   </td>
-                  <td className="px-4 py-3 text-right text-gray-500 tabular-nums hidden lg:table-cell">
-                    {formatNumber(inv.price)} {inv.currency !== 'CZK' ? inv.currency : 'Kč'}
+                  <td className="px-4 py-3 text-right text-gray-500 tabular-nums whitespace-nowrap hidden lg:table-cell">
+                    {inv.currency !== 'CZK' && inv.curr_price != null
+                      ? <>{formatNumber(inv.curr_price)} {inv.currency}</>
+                      : <>{formatNumber(inv.price)} Kč</>
+                    }
                   </td>
-                  <td className="px-4 py-3 hidden lg:table-cell">
-                    {isCancelled && (
-                      <span className="text-red-500 text-xs font-medium">{formatDate(inv.cancellation)}</span>
-                    )}
-                  </td>
+                  {hasStorno && (
+                    <td className="px-4 py-3">
+                      {isCancelled && (
+                        <span className="text-red-500 text-xs font-medium">{fmtD(inv.cancellation)}</span>
+                      )}
+                    </td>
+                  )}
 
                   {/* Akce */}
                   <td className="px-3 py-3">

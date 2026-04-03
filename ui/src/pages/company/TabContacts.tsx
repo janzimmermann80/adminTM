@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getContacts, addPerson, updatePerson, deletePerson, addContact, updateContact, deleteContact, upsertUserAccount } from '../../api'
+import { getContacts, addPerson, updatePerson, deletePerson, addContact, updateContact, deleteContact, upsertUserAccount, getImpersonateUrl } from '../../api'
 import { Spinner } from '../../components/Spinner'
 import { SendSmsModal } from '../../components/SendSmsModal'
 import { SendEmailModal } from '../../components/SendEmailModal'
@@ -20,9 +20,6 @@ interface RowEdit {
   password: string
 }
 
-const IMPERSONATE_BASE = 'https://admin.euro-sped.cz/company-details/login-truckmanager-eu.php'
-const impersonateUrl = (type: string, username: string) =>
-  `${IMPERSONATE_BASE}?type=${type}&username=${encodeURIComponent(username)}`
 
 export const TabContacts = ({ companyKey, companyId }: Props) => {
   const [persons, setPersons] = useState<ContactPerson[]>([])
@@ -40,6 +37,20 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
 
   const [smsTarget, setSmsTarget] = useState<{ gsm: string; name: string } | null>(null)
   const [emailTarget, setEmailTarget] = useState<string | null>(null)
+  const [impersonating, setImpersonating] = useState<string | null>(null)
+
+  const handleImpersonate = async (type: string, username: string) => {
+    const key = `${type}:${username}`
+    setImpersonating(key)
+    try {
+      const { url } = await getImpersonateUrl(companyKey, type, username)
+      window.open(url, '_blank', 'noreferrer')
+    } catch (e: any) {
+      alert(e.message ?? 'Chyba impersonace')
+    } finally {
+      setImpersonating(null)
+    }
+  }
 
   const [addContactFor, setAddContactFor] = useState<number | null>(null)
   const [newContact, setNewContact] = useState({ type: 'U', value: '' })
@@ -307,11 +318,12 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
                         {account?.username && (
                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             {(['app','devel'] as const).map(type => (
-                              <a key={type} href={impersonateUrl(type, account.username)} target="_blank" rel="noreferrer"
+                              <button key={type} onClick={e => { e.stopPropagation(); handleImpersonate(type, account.username) }}
+                                disabled={impersonating === `${type}:${account.username}`}
                                 title={`Impersonace ${type === 'devel' ? 'app2' : type}`}
-                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-500 transition-colors">
+                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-500 transition-colors disabled:opacity-50">
                                 {type === 'devel' ? 'app2' : type}
-                              </a>
+                              </button>
                             ))}
                           </div>
                         )}
@@ -345,11 +357,12 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
                     <span className="font-mono text-gray-800 text-xs">{acc.username}</span>
                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       {(['app','devel'] as const).map(type => (
-                        <a key={type} href={impersonateUrl(type, acc.username)} target="_blank" rel="noreferrer"
+                        <button key={type} onClick={e => { e.stopPropagation(); handleImpersonate(type, acc.username) }}
+                          disabled={impersonating === `${type}:${acc.username}`}
                           title={`Impersonace ${type}`}
-                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-500 transition-colors">
+                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-500 transition-colors disabled:opacity-50">
                           {type}
-                        </a>
+                        </button>
                       ))}
                     </div>
                   </div>

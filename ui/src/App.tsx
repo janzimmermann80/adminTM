@@ -9,6 +9,7 @@ import { WorkerDetail } from './pages/WorkerDetail'
 import { InvoicePrint } from './pages/InvoicePrint'
 import { Bank } from './pages/Bank'
 import { Statistics } from './pages/Statistics'
+import { Queries } from './pages/Queries'
 import { Spinner } from './components/Spinner'
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -31,6 +32,7 @@ const AppRoutes = () => (
     <Route path="/invoicing/:id/print" element={<InvoicePrint />} />
     <Route path="/bank" element={<ProtectedRoute><Bank /></ProtectedRoute>} />
     <Route path="/statistics" element={<ProtectedRoute><Statistics /></ProtectedRoute>} />
+    <Route path="/queries" element={<ProtectedRoute><Queries /></ProtectedRoute>} />
     <Route path="/" element={<Navigate to="/overview" replace />} />
     <Route path="*" element={<Navigate to="/overview" replace />} />
   </Routes>

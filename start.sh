@@ -1420,6 +1420,41 @@ else:
     print('Patch OK: camt053Parser seqNumber', file=sys.stderr)
 PYEOF
 
+# Patch: camt053Parser — e2e EndToEndId může být objekt/pole z XML parseru
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/services/camt053Parser.ts'
+src = open(f).read()
+old = "  const e2e: string = refs['EndToEndId'] ?? ''"
+new = "  const e2eRaw = refs['EndToEndId']\n  const e2e: string = e2eRaw == null ? '' : (typeof e2eRaw === 'object' ? String(Array.isArray(e2eRaw) ? e2eRaw[0] ?? '' : '') : String(e2eRaw))"
+if new in src:
+    print('Patch SKIP: camt053Parser e2e type guard already present', file=sys.stderr)
+elif old not in src:
+    print('Patch FAIL: camt053Parser e2e — old string not found', file=sys.stderr)
+    sys.exit(1)
+else:
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: camt053Parser e2e type guard', file=sys.stderr)
+PYEOF
+
+# Patch: camt053Parser — VS z e2e: extractSymbol + no-separator regex (?/VS5408192111/SS/KS)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/services/camt053Parser.ts'
+src = open(f).read()
+marker = 'vsNoSep'
+if marker in src:
+    print('Patch SKIP: camt053Parser e2e vsNoSep already present', file=sys.stderr)
+else:
+    old = "  if (e2e && e2e !== 'NOTPROVIDED') {\n    const vsMatch = e2e.match(/(?:^|\\/)(\d{1,10})(?:\\/|$)/)\n    if (vsMatch) return vsMatch[1]\n    if (/^\\d{1,10}$/.test(e2e.trim())) return e2e.trim()\n  }"
+    new = "  if (e2e && e2e !== 'NOTPROVIDED') {\n    const vsFromE2e = extractSymbol('VS', e2e)\n    if (vsFromE2e) return vsFromE2e\n    // Formát bez oddělovače: ?/VS5408192111/SS/KS nebo /VS12345/\n    const vsNoSep = /(?:^|[/?])VS(\\d{1,10})(?:\\/|$)/i.exec(e2e)\n    if (vsNoSep) return vsNoSep[1]\n    const vsMatch = e2e.match(/(?:^|\\/)(\d{1,10})(?:\\/|$)/)\n    if (vsMatch) return vsMatch[1]\n    if (/^\\d{1,10}$/.test(e2e.trim())) return e2e.trim()\n  }"
+    if old not in src:
+        print('Patch FAIL: camt053Parser e2e vsNoSep — old string not found', file=sys.stderr)
+        sys.exit(1)
+    open(f, 'w').write(src.replace(old, new))
+    print('Patch OK: camt053Parser e2e vsNoSep', file=sys.stderr)
+PYEOF
+
 # Patch: bank.ts — seq_number v bank_statements
 python3 - <<'PYEOF'
 import sys
@@ -1995,6 +2030,48 @@ else:
     print('Patch SKIP: series names already patched', file=sys.stderr)
 PYEOF
 
+# Patch: invoicing.ts — GET /cnb-rate/:code (kurz ČNB)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/invoicing.ts'
+src = open(f).read()
+if 'cnb-rate' in src:
+    print('Patch SKIP: invoicing.ts cnb-rate already present', file=sys.stderr)
+else:
+    anchor = '  // GET /api/invoicing/services'
+    new_block = '''  // GET /api/invoicing/cnb-rate/:code — aktuální kurz z ČNB (denní kurz devizového trhu)
+  app.get('/cnb-rate/:code', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { code } = request.params as { code: string }
+    try {
+      const res = await fetch('https://www.cnb.cz/cs/financni_trhy/devizovy_trh/kurzy_devizoveho_trhu/denni_kurz.txt')
+      if (!res.ok) return reply.code(502).send({ error: 'ČNB nedostupná' })
+      const text = await res.text()
+      const dateStr = text.split('\\n')[0]?.split(' ')[0] ?? ''
+      for (const line of text.split('\\n').slice(2)) {
+        const parts = line.split('|')
+        if (parts.length < 5) continue
+        if (parts[3].trim().toUpperCase() !== code.toUpperCase()) continue
+        const amount = parseInt(parts[2], 10) || 1
+        const rate = parseFloat(parts[4].trim().replace(',', '.')) / amount
+        return reply.send({ code: parts[3].trim(), rate, date: dateStr })
+      }
+      return reply.code(404).send({ error: `Kurz pro ${code} nenalezen` })
+    } catch (e: any) {
+      return reply.code(502).send({ error: `ČNB nedostupná: ${e.message}` })
+    }
+  })
+
+  // GET /api/invoicing/services'''
+    if anchor in src:
+        open(f, 'w').write(src.replace(anchor, new_block))
+        print('Patch OK: invoicing.ts cnb-rate', file=sys.stderr)
+    else:
+        print('Patch FAIL: invoicing.ts cnb-rate anchor not found', file=sys.stderr)
+        sys.exit(1)
+PYEOF
+
 # Patch: statistics.ts — přidej orders-monthly endpoint (ta.obligation)
 python3 - <<'PYEOF'
 import sys
@@ -2222,18 +2299,18 @@ export async function queriesRoutes(app: FastifyInstance) {
     const off = Math.max(Number(q.offset ?? 0), 0)
 
     try {
-      const rows = await sql\`
+      const rows = await sql`
         SELECT *
         FROM provider.reports_schedule
         WHERE 1=1
-          \${q.company_key ? sql\`AND company_key = \${Number(q.company_key)}\` : sql\`\`}
-          \${q.type ? sql\`AND type = \${q.type}\` : sql\`\`}
-          \${q.one_time === 'true' ? sql\`AND one_time = true\`
-            : q.one_time === 'false' ? sql\`AND (one_time = false OR one_time IS NULL)\`
-            : sql\`\`}
+          ${q.company_key ? sql`AND company_key = ${Number(q.company_key)}` : sql``}
+          ${q.type ? sql`AND type = ${q.type}` : sql``}
+          ${q.one_time === 'true' ? sql`AND one_time = true`
+            : q.one_time === 'false' ? sql`AND (one_time = false OR one_time IS NULL)`
+            : sql``}
         ORDER BY created_time DESC
-        LIMIT \${lim} OFFSET \${off}
-      \`
+        LIMIT ${lim} OFFSET ${off}
+      `
       return reply.send(rows)
     } finally {
       await sql.end()
@@ -2250,15 +2327,15 @@ export async function queriesRoutes(app: FastifyInstance) {
     const lim = Math.min(Number(q.limit ?? 100), 1000)
 
     try {
-      const rows = await sql\`
+      const rows = await sql`
         SELECT *
         FROM ta.ai_prompt
         WHERE 1=1
-          \${q.company_key ? sql\`AND company_key = \${Number(q.company_key)}\` : sql\`\`}
-          \${q.type ? sql\`AND type = \${q.type}\` : sql\`\`}
+          ${q.company_key ? sql`AND company_key = ${Number(q.company_key)}` : sql``}
+          ${q.type ? sql`AND type = ${q.type}` : sql``}
         ORDER BY updated_time DESC
-        LIMIT \${lim}
-      \`
+        LIMIT ${lim}
+      `
       return reply.send(rows)
     } finally {
       await sql.end()
@@ -2322,6 +2399,117 @@ if '/:id/impersonate' not in src:
     print('Patch OK: companies/index.ts — impersonate endpoint added', file=sys.stderr)
 else:
     print('Patch SKIP: impersonate already in companies/index.ts', file=sys.stderr)
+PYEOF
+
+# Patch: bank.ts — přidat vs_company_key (resolve firmy z VS pro oba GET endpointy, proforma i regulérní)
+python3 << 'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/bank.ts'
+src = open(f).read()
+
+if 'vs_company_key' in src:
+    print('Patch SKIP: bank.ts — vs_company_key already present', file=sys.stderr)
+else:
+    old1 = '''      const txWithInvoice = transactions.map(t => ({
+        ...t,
+        invoice_number:     invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:       invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:      invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
+        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+      }))
+
+      return reply.send({ ...stmt, transactions: txWithInvoice })'''
+    new1 = '''      // Resolve company_key z VS: proforma (VS[0]='5', suffix=VS[2..6]) nebo regulérní (suffix=VS[1..5])
+      const vsTxsAll = transactions.filter((t: any) => t.vs && t.vs.length >= 6)
+      const vsCompanyMap: Record<string, number> = {}
+      if (vsTxsAll.length > 0) {
+        const suffixes = [...new Set(vsTxsAll.map((t: any) =>
+          t.vs[0] === '5' && t.vs.length >= 8 ? t.vs.slice(2, 7) : t.vs.slice(1, 6)
+        ))]
+        const vsCompanies = await pgSql`
+          SELECT company_key, RIGHT(id::text, 5) AS suffix
+          FROM provider.company
+          WHERE RIGHT(id::text, 5) = ANY(${suffixes})
+        `
+        for (const c of vsCompanies) vsCompanyMap[c.suffix] = c.company_key
+      }
+
+      const txWithInvoice = transactions.map(t => ({
+        ...t,
+        invoice_number:     invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:       invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:      invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
+        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+        vs_company_key:      t.vs?.length >= 6
+          ? (vsCompanyMap[t.vs[0] === '5' && t.vs.length >= 8 ? t.vs.slice(2, 7) : t.vs.slice(1, 6)] ?? null)
+          : null,
+      }))
+
+      return reply.send({ ...stmt, transactions: txWithInvoice })'''
+
+    old2 = '''      const result = transactions.map(t => ({
+        ...t,
+        invoice_number:     invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:       invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:      invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
+        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+      }))'''
+    new2 = '''      // Resolve company_key z VS: proforma (VS[0]='5', suffix=VS[2..6]) nebo regulérní (suffix=VS[1..5])
+      const vsTxsAll2 = transactions.filter((t: any) => t.vs && t.vs.length >= 6)
+      const vsCompanyMap2: Record<string, number> = {}
+      if (vsTxsAll2.length > 0) {
+        const suffixes2 = [...new Set(vsTxsAll2.map((t: any) =>
+          t.vs[0] === '5' && t.vs.length >= 8 ? t.vs.slice(2, 7) : t.vs.slice(1, 6)
+        ))]
+        const vsCompanies2 = await pgSql`
+          SELECT company_key, RIGHT(id::text, 5) AS suffix
+          FROM provider.company
+          WHERE RIGHT(id::text, 5) = ANY(${suffixes2})
+        `
+        for (const c of vsCompanies2) vsCompanyMap2[c.suffix] = c.company_key
+      }
+
+      const result = transactions.map(t => ({
+        ...t,
+        invoice_number:     invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:       invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:      invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
+        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+        vs_company_key:      t.vs?.length >= 6
+          ? (vsCompanyMap2[t.vs[0] === '5' && t.vs.length >= 8 ? t.vs.slice(2, 7) : t.vs.slice(1, 6)] ?? null)
+          : null,
+      }))'''
+
+    if old1 in src and old2 in src:
+        src = src.replace(old1, new1).replace(old2, new2)
+        open(f, 'w').write(src)
+        print('Patch OK: bank.ts — vs_company_key added (proforma + regular VS)', file=sys.stderr)
+    else:
+        print('Patch SKIP: bank.ts — expected patterns not found', file=sys.stderr)
+PYEOF
+
+# Patch: camt053Parser — VS z Ustrd jako prostý číselný řetězec (ČSOB EUR účet)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/services/camt053Parser.ts'
+src = open(f).read()
+old = "  // 4. Unstructured remittance\n  const vsFromUstrd = extractSymbol('VS', rmtUstrd)\n  if (vsFromUstrd) return vsFromUstrd\n\n  return ''\n}"
+new = "  // 4. Unstructured remittance — formát \"VS:12345\"\n  const vsFromUstrd = extractSymbol('VS', rmtUstrd)\n  if (vsFromUstrd) return vsFromUstrd\n\n  // 5. Unstructured remittance — prostý číselný VS (bez prefixu, např. ČSOB EUR účet)\n  if (rmtUstrd && /^\\d+$/.test(rmtUstrd.trim())) return rmtUstrd.trim()\n\n  return ''\n}"
+if 'prostý číselný VS' in src:
+    print('Patch SKIP: camt053Parser — plain numeric VS already present', file=sys.stderr)
+elif old in src:
+    open(f, 'w').write(src.replace(old, new, 1))
+    print('Patch OK: camt053Parser — plain numeric VS from Ustrd', file=sys.stderr)
+else:
+    print('Patch FAIL: camt053Parser — plain numeric VS anchor not found', file=sys.stderr)
 PYEOF
 
 # Spusť backend z patchované kopie

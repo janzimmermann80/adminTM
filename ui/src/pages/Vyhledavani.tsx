@@ -287,7 +287,7 @@ export const Vyhledavani = () => {
                     </div>
                   </td>
                   <td className="text-xs text-gray-500 pl-3 pr-1 py-1 whitespace-nowrap">Registrace:</td>
-                  <td className="py-1"><input className={inpSm} value={filter.prog_lent_date} onChange={f('prog_lent_date')} placeholder="RRRR-MM-DD" /></td>
+                  <td className="py-1"><input type="date" className={inp} value={filter.prog_lent_date} onChange={f('prog_lent_date')} /></td>
                   <td className="py-1 pl-1">
                     <select value={filter.prog_lent_date_op} onChange={f('prog_lent_date_op')} className="border border-gray-300 rounded px-1 py-1 text-xs outline-none">
                       <option>&gt;=</option><option>&lt;=</option><option>=</option>
@@ -296,11 +296,11 @@ export const Vyhledavani = () => {
                 </tr>
                 {/* row 2: Smlouva datum + Přístup */}
                 <tr>
-                  <td className="text-xs text-gray-500 pr-2 py-1 whitespace-nowrap">&gt;/&gt;:</td>
-                  <td className="py-1"><input className={inpSm} value={filter.contract_date_from} onChange={f('contract_date_from')} placeholder="od" /></td>
-                  <td className="py-1 pl-1"><input className={inpSm} value={filter.contract_date_to} onChange={f('contract_date_to')} placeholder="do" /></td>
+                  <td className="text-xs text-gray-500 pr-2 py-1 whitespace-nowrap">Smlouva:</td>
+                  <td className="py-1"><input type="date" className={inp} value={filter.contract_date_from} onChange={f('contract_date_from')} /></td>
+                  <td className="py-1 pl-1"><input type="date" className={inp} value={filter.contract_date_to} onChange={f('contract_date_to')} /></td>
                   <td className="text-xs text-gray-500 pl-3 pr-1 py-1 whitespace-nowrap">Přístup:</td>
-                  <td className="py-1"><input className={inpSm} value={filter.admittance_date} onChange={f('admittance_date')} placeholder="RRRR-MM-DD" /></td>
+                  <td className="py-1"><input type="date" className={inp} value={filter.admittance_date} onChange={f('admittance_date')} /></td>
                   <td className="py-1 pl-1">
                     <select value={filter.admittance_date_op} onChange={f('admittance_date_op')} className="border border-gray-300 rounded px-1 py-1 text-xs outline-none">
                       <option>&gt;=</option><option>&lt;=</option><option>=</option>
@@ -318,7 +318,7 @@ export const Vyhledavani = () => {
                     </div>
                   </td>
                   <td className="text-xs text-gray-500 pl-3 pr-1 py-1 whitespace-nowrap">Program:</td>
-                  <td className="py-1"><input className={inpSm} value={filter.prog_sent_date} onChange={f('prog_sent_date')} placeholder="RRRR-MM-DD" /></td>
+                  <td className="py-1"><input type="date" className={inp} value={filter.prog_sent_date} onChange={f('prog_sent_date')} /></td>
                   <td className="py-1 pl-1">
                     <select value={filter.prog_sent_date_op} onChange={f('prog_sent_date_op')} className="border border-gray-300 rounded px-1 py-1 text-xs outline-none">
                       <option>&gt;=</option><option>&lt;=</option><option>=</option>
@@ -328,8 +328,8 @@ export const Vyhledavani = () => {
                 {/* row 4: Poznámka + Země */}
                 <tr>
                   <td className="text-xs text-gray-500 pr-2 py-1 whitespace-nowrap">Poznámka:</td>
-                  <td className="py-1"><input className={inpSm} value={filter.note_from} onChange={f('note_from')} placeholder="od" /></td>
-                  <td className="py-1 pl-1"><input className={inpSm} value={filter.note_to} onChange={f('note_to')} placeholder="do" /></td>
+                  <td className="py-1"><input type="date" className={inp} value={filter.note_from} onChange={f('note_from')} /></td>
+                  <td className="py-1 pl-1"><input type="date" className={inp} value={filter.note_to} onChange={f('note_to')} /></td>
                   <td className="text-xs text-gray-500 pl-3 pr-1 py-1 whitespace-nowrap">Země:</td>
                   <td className="py-1" colSpan={2}><input className={inp} value={filter.country} onChange={f('country')} placeholder="CZ, SK…" maxLength={3} /></td>
                 </tr>

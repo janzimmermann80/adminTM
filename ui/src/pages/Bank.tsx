@@ -5,8 +5,10 @@ import { formatDate, formatNumber } from '../utils'
 import {
   getBankTransactions, matchBankTransaction, unmatchBankTransaction,
   searchBankInvoices, uploadBankXml, getBankStatements, deleteBankStatement, settleInvoice,
+  extendAccess, addNote, getInvoiceDetail,
 } from '../api'
 import { InvoiceFormModal } from '../components/InvoiceFormModal'
+import { InvoiceEmailModal } from './company/TabInvoices'
 import { CompanyDetailPanel } from './company/CompanyDetailPanel'
 
 // ── Invoice search modal ──────────────────────────────────────────────────────
@@ -16,17 +18,18 @@ function InvoiceSearchModal({ tx, onClose, onMatched }: {
   onMatched: () => void
 }) {
   const isProforma = tx.vs?.charAt(0) === '5'
-  const [q, setQ] = useState(tx.vs ?? '')
+  const [q, setQ] = useState(isProforma ? (tx.vs ?? '') : (tx.counterparty_name?.trim() ?? tx.vs ?? ''))
   const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [invoiceFormTarget, setInvoiceFormTarget] = useState<{ companyKey: number; prefill: any } | null>(null)
+  const [invoiceFormTarget, setInvoiceFormTarget] = useState<{ companyKey: number; prefill: any; proformaData?: any } | null>(null)
 
   const search = async (val: string) => {
     if (!val.trim()) return
     setLoading(true)
     try {
-      const rows = await searchBankInvoices(val, isProforma ? undefined : tx.amount, isProforma)
+      const useAmount = !isProforma && /^\d+$/.test(val.trim())
+      const rows = await searchBankInvoices(val, useAmount ? tx.amount : undefined, isProforma)
       setResults(rows)
     } catch {}
     finally { setLoading(false) }
@@ -86,36 +89,39 @@ function InvoiceSearchModal({ tx, onClose, onMatched }: {
                     {inv.settlement && <span className="ml-2 text-xs text-green-600 font-medium">uhrazeno {formatDate(inv.settlement)}</span>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-sm font-semibold text-gray-800">{formatNumber(inv.total)} {inv.currency}</span>
+                    <span className="text-sm font-semibold text-gray-800">{formatNumber(inv.curr_total ?? inv.total)} {inv.currency}</span>
                     {isProforma && (
                       <button onClick={() => {
                         const series = Number(inv.series)
+                        // inv.quantity = počet měsíců → Počet (množství položky)
+                        // inv.car_num  = počet vozidel → text názvu položky
+                        const months = Number(inv.quantity) || 1
+                        const vehicles = Number(inv.car_num) || 1
                         const itemName = series === 4
-                          ? `Předplatné systému TruckManager Doprava & Spedice pro ${inv.quantity} vozidel`
+                          ? `Předplatné systému TruckManager Doprava & Spedice pro ${vehicles} vozidel`
                           : series === 1
                             ? 'Předplatné systému TruckManager Spedice'
                             : ''
-                        setInvoiceFormTarget({ companyKey: inv.company_key, prefill: {
+                        setInvoiceFormTarget({ companyKey: inv.company_key, proformaData: inv, prefill: {
                           series: 4,
                           proforma_number: parseInt('5' + inv.series + String(inv.company_id).slice(-5) + inv.number),
                           currency: inv.currency,
-                          curr_value: inv.exchange_rate && inv.exchange_rate !== 1 ? inv.exchange_rate : undefined,
+                          curr_value: inv.exchange_rate && Number(inv.exchange_rate) !== 1 ? Number(inv.exchange_rate) : undefined,
                           issued: tx.transaction_date?.slice(0, 10),
                           fulfilment: tx.transaction_date?.slice(0, 10),
                           maturity: tx.transaction_date?.slice(0, 10),
                           settlement: tx.transaction_date?.slice(0, 10),
                           payment_method: 'T',
                           items: itemName ? (() => {
-                            const qty = inv.quantity || 1
-                            // inv.total může být null — záloha z banky tx.amount je spolehlivý základ
-                            const paidTotal = inv.total != null ? Number(inv.total)
-                              : (inv.currency !== 'CZK' && Number(inv.exchange_rate) > 1)
-                                ? tx.amount / Number(inv.exchange_rate)
-                                : tx.amount
+                            const total = inv.curr_total != null ? Number(inv.curr_total) : tx.amount
+                            const paidTotal = inv.currency !== 'CZK' && Number(inv.exchange_rate) > 1
+                              ? total / Number(inv.exchange_rate)
+                              : total
+                            // price_unit = cena za 1 měsíc (celková / měsíce, bez DPH)
                             const priceUnit = inv.currency === 'CZK'
-                              ? Math.round(paidTotal / qty / 1.21 * 100) / 100
-                              : Math.round(paidTotal / qty * 100) / 100
-                            return [{ name: itemName, price_unit: priceUnit, vat_rate: inv.currency === 'CZK' ? 21 : 0, quantity: qty, discount: 0 }]
+                              ? Math.round(paidTotal / months / 1.21 * 100) / 100
+                              : Math.round(paidTotal / months * 100) / 100
+                            return [{ name: itemName, price_unit: priceUnit, vat_rate: inv.currency === 'CZK' ? 21 : 0, quantity: months, discount: 0 }]
                           })() : undefined,
                         }})
                       }} disabled={saving}
@@ -150,6 +156,7 @@ function InvoiceSearchModal({ tx, onClose, onMatched }: {
       <InvoiceFormModal
         companyKey={invoiceFormTarget.companyKey}
         prefill={invoiceFormTarget.prefill}
+        proformaData={invoiceFormTarget.proformaData}
         onClose={() => setInvoiceFormTarget(null)}
         onSaved={() => setInvoiceFormTarget(null)}
       />
@@ -159,12 +166,13 @@ function InvoiceSearchModal({ tx, onClose, onMatched }: {
 }
 
 // ── Statements accordion ─────────────────────────────────────────────────────
-function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany }: {
+function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onCreateInvoice }: {
   tx: any
   onUnmatch: (id: number) => void
   onMatch: (tx: any) => void
   onSettle: (tx: any) => void
   onOpenCompany: (companyKey: number) => void
+  onCreateInvoice: (tx: any) => void
 }) {
   const isCredit = tx.credit_debit === 'CRDT'
   const isMatched = !!(tx.matched_invoice_id || tx.matched_company_key)
@@ -175,7 +183,13 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany }: {
       <td className={`px-4 py-2.5 font-mono text-right whitespace-nowrap text-sm font-medium ${isCredit ? 'text-green-700' : 'text-red-600'}`}>
         {isCredit ? '+' : '-'}{formatNumber(tx.amount)} {tx.currency}
       </td>
-      <td className="px-4 py-2.5 font-mono text-xs text-gray-700">{tx.vs || <span className="text-gray-300">—</span>}</td>
+      <td className="px-4 py-2.5 font-mono text-xs text-gray-700">
+        {tx.vs
+          ? (tx.vs_company_key
+              ? <button onClick={() => onOpenCompany(tx.vs_company_key)} className={`font-mono text-xs hover:underline ${isProforma ? 'text-purple-700 hover:text-purple-900' : 'text-teal-700 hover:text-teal-900'}`}>{tx.vs}</button>
+              : tx.vs)
+          : <span className="text-gray-300">—</span>}
+      </td>
       <td className="px-4 py-2.5 text-gray-600 hidden md:table-cell max-w-[160px] truncate text-xs" title={tx.counterparty_name}>
         {tx.counterparty_name || <span className="text-gray-300">—</span>}
       </td>
@@ -201,6 +215,17 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany }: {
                 </svg>
               </button>
         )}
+        {isMatched && isProforma && (
+          tx.proforma_issued_invoice
+            ? (tx.proforma_issued_invoice.settlement
+                ? <span className="text-green-600 font-medium">{formatDate(tx.proforma_issued_invoice.settlement)}</span>
+                : <span className="text-gray-500 text-xs">Faktura {tx.proforma_issued_invoice.year}/{tx.proforma_issued_invoice.number}</span>
+              )
+            : <button onClick={() => onCreateInvoice(tx)}
+                className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg transition-colors">
+                Vystavit fakturu
+              </button>
+        )}
       </td>
       <td className="px-4 py-2.5 text-right">
         {isMatched ? (
@@ -215,11 +240,12 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany }: {
   )
 }
 
-function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany }: {
+function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onCreateInvoice }: {
   onDeleted: () => void
   onMatch: (tx: any) => void
   onUnmatch: (id: number) => void
   onOpenCompany: (companyKey: number) => void
+  onCreateInvoice: (tx: any) => void
 }) {
   const [statements, setStatements] = useState<any[]>([])
   const [open, setOpen] = useState<number | null>(null)
@@ -345,6 +371,7 @@ function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany }: {
                         onUnmatch={async (id) => { await onUnmatch(id); refreshTx(s.id) }}
                         onMatch={(tx) => { onMatch(tx) }}
                         onOpenCompany={onOpenCompany}
+                        onCreateInvoice={onCreateInvoice}
                         onSettle={async (tx) => {
                           try {
                             await settleInvoice(String(tx.matched_invoice_id), tx.transaction_date)
@@ -376,6 +403,76 @@ export const Bank = () => {
   const [matchTarget, setMatchTarget] = useState<any | null>(null)
   const [statementsKey, setStatementsKey] = useState(0)
   const [companyPanelKey, setCompanyPanelKey] = useState<number | null>(null)
+  const [invoiceFormTarget, setInvoiceFormTarget] = useState<{ companyKey: number; prefill: any; proformaData?: any } | null>(null)
+  const [emailTarget, setEmailTarget] = useState<{ inv: any; companyId: string; companyKey: string } | null>(null)
+
+  const handleProformaSaved = async (invoiceKey: number, proformaData: any, companyKey: number) => {
+    const months = Number(proformaData.quantity) || 1
+    const vehicles = Number(proformaData.car_num) || 1
+    try {
+      const [inv] = await Promise.all([
+        getInvoiceDetail(String(invoiceKey)),
+        extendAccess(String(companyKey), months),
+        addNote(String(companyKey), {
+          type: 'O',
+          text: `Předplatili si ${months} ${months === 1 ? 'měsíc' : months < 5 ? 'měsíce' : 'měsíců'} pro ${vehicles} ${vehicles === 1 ? 'auto' : vehicles < 5 ? 'auta' : 'aut'}.`,
+        }),
+      ])
+      setEmailTarget({
+        inv,
+        companyId: String(proformaData.company_id ?? ''),
+        companyKey: String(companyKey),
+      })
+      setStatementsKey(k => k + 1)
+    } catch (e: any) {
+      alert('Faktura uložena, ale chyba při prodloužení přístupu / poznámce: ' + e.message)
+      setStatementsKey(k => k + 1)
+    }
+  }
+
+  const handleCreateInvoice = async (tx: any) => {
+    try {
+      const results = await searchBankInvoices(tx.vs, undefined, true)
+      const inv = results[0]
+      const companyKey = inv?.company_key ?? tx.invoice_company_key
+      const base = {
+        series: 4,
+        issued: tx.transaction_date?.slice(0, 10),
+        fulfilment: tx.transaction_date?.slice(0, 10),
+        maturity: tx.transaction_date?.slice(0, 10),
+        settlement: tx.transaction_date?.slice(0, 10),
+        payment_method: 'T',
+      }
+      if (!inv) { setInvoiceFormTarget({ companyKey, prefill: base }); return }
+      const series = Number(inv.series)
+      // inv.quantity = počet měsíců → Počet (množství položky)
+      // inv.car_num  = počet vozidel → text názvu položky
+      const months = Number(inv.quantity) || 1
+      const vehicles = Number(inv.car_num) || 1
+      const itemName = series === 4
+        ? `Předplatné systému TruckManager Doprava & Spedice pro ${vehicles} vozidel`
+        : series === 1 ? 'Předplatné systému TruckManager Spedice' : ''
+      const total = inv.curr_total != null ? Number(inv.curr_total) : tx.amount
+      const paidTotal = inv.currency !== 'CZK' && Number(inv.exchange_rate) > 1
+        ? total / Number(inv.exchange_rate)
+        : total
+      // price_unit = cena za 1 měsíc (celková / měsíce, bez DPH)
+      const priceUnit = inv.currency === 'CZK'
+        ? Math.round(paidTotal / months / 1.21 * 100) / 100
+        : Math.round(paidTotal / months * 100) / 100
+      setInvoiceFormTarget({
+        companyKey,
+        proformaData: inv,
+        prefill: {
+          ...base,
+          proforma_number: parseInt('5' + inv.series + String(inv.company_id).slice(-5) + inv.number),
+          currency: inv.currency,
+          curr_value: inv.exchange_rate && Number(inv.exchange_rate) !== 1 ? Number(inv.exchange_rate) : undefined,
+          items: itemName ? [{ name: itemName, price_unit: priceUnit, vat_rate: inv.currency === 'CZK' ? 21 : 0, quantity: months, discount: 0 }] : undefined,
+        },
+      })
+    } catch (e: any) { alert(e.message) }
+  }
 
   const [dragOver, setDragOver] = useState(false)
 
@@ -458,6 +555,7 @@ export const Bank = () => {
         onMatch={tx => setMatchTarget(tx)}
         onUnmatch={handleUnmatch}
         onOpenCompany={key => setCompanyPanelKey(key)}
+        onCreateInvoice={handleCreateInvoice}
       />
 
       {matchTarget && (
@@ -465,6 +563,24 @@ export const Bank = () => {
           tx={matchTarget}
           onClose={() => setMatchTarget(null)}
           onMatched={() => setMatchTarget(null)}
+        />
+      )}
+
+      {invoiceFormTarget && (
+        <InvoiceFormModal
+          companyKey={invoiceFormTarget.companyKey}
+          prefill={invoiceFormTarget.prefill}
+          proformaData={invoiceFormTarget.proformaData}
+          onClose={() => setInvoiceFormTarget(null)}
+          onSaved={(invoiceKey) => {
+            const target = invoiceFormTarget
+            setInvoiceFormTarget(null)
+            if (target.proformaData && invoiceKey) {
+              handleProformaSaved(invoiceKey, target.proformaData, target.companyKey)
+            } else {
+              setStatementsKey(k => k + 1)
+            }
+          }}
         />
       )}
 
@@ -478,6 +594,16 @@ export const Bank = () => {
             />
           </div>
         </div>
+      )}
+
+      {emailTarget && (
+        <InvoiceEmailModal
+          inv={emailTarget.inv}
+          companyId={emailTarget.companyId}
+          companyKey={emailTarget.companyKey}
+          onClose={() => setEmailTarget(null)}
+          onSent={() => setEmailTarget(null)}
+        />
       )}
     </Layout>
   )

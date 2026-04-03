@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
-import { getInvoiceDetail, getInvoicingMeta, getInvoicingServices, updateInvoice, createInvoiceSingle } from '../api'
+import { getInvoiceDetail, getInvoicingMeta, getInvoicingServices, updateInvoice, createInvoiceSingle, getCnbRate } from '../api'
 import { Spinner } from './Spinner'
-import { formatNumber } from '../utils'
+import { formatNumber, formatDate } from '../utils'
 
 interface ItemRow {
   _key: string
@@ -37,6 +37,7 @@ interface Props {
   invoiceKey?: number    // edit mode
   companyKey?: number   // create mode
   prefill?: InvoicePrefill
+  proformaData?: any    // raw proforma row for reference display
   onClose: () => void
   onSaved: (invoiceKey?: number) => void
 }
@@ -73,7 +74,7 @@ function calcTotals(items: ItemRow[]) {
   return { net: Math.round(net * 100) / 100, vat: Math.round(vat * 100) / 100, total: Math.round((net + vat) * 100) / 100 }
 }
 
-export function InvoiceFormModal({ invoiceKey, companyKey, prefill, onClose, onSaved }: Props) {
+export function InvoiceFormModal({ invoiceKey, companyKey, prefill, proformaData, onClose, onSaved }: Props) {
   const isEdit = !!invoiceKey
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -91,6 +92,18 @@ export function InvoiceFormModal({ invoiceKey, companyKey, prefill, onClose, onS
   const [paymentMethod, setPaymentMethod] = useState(prefill?.payment_method ?? 'T')
   const [currency, setCurrency] = useState(prefill?.currency ?? 'CZK')
   const [currValue, setCurrValue] = useState(String(prefill?.curr_value ?? 1))
+  const [cnbLoading, setCnbLoading] = useState(false)
+  const [cnbDate, setCnbDate] = useState('')
+
+  const fetchCnbRate = async (code: string) => {
+    setCnbLoading(true); setCnbDate('')
+    try {
+      const data = await getCnbRate(code)
+      setCurrValue(String(data.rate))
+      setCnbDate(data.date)
+    } catch {}
+    finally { setCnbLoading(false) }
+  }
   const [proformaNumber, setProformaNumber] = useState(String(prefill?.proforma_number ?? ''))
   const [demandNotes, setDemandNotes] = useState('0')
   const [items, setItems] = useState<ItemRow[]>(
@@ -260,8 +273,10 @@ export function InvoiceFormModal({ invoiceKey, companyKey, prefill, onClose, onS
                 <div>
                   <label className="block text-xs font-medium text-gray-500 mb-1">Měna *</label>
                   <select className={selectCls} value={currency} onChange={e => {
-                    setCurrency(e.target.value)
-                    if (e.target.value === 'CZK') setCurrValue('1')
+                    const c = e.target.value
+                    setCurrency(c)
+                    if (c === 'CZK') { setCurrValue('1'); setCnbDate('') }
+                    else fetchCnbRate(c)
                   }}>
                     <option value="CZK">CZK</option>
                     <option value="EUR">EUR</option>
@@ -269,8 +284,12 @@ export function InvoiceFormModal({ invoiceKey, companyKey, prefill, onClose, onS
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Kurz (Kč / {currency})</label>
-                  <input type="number" step="0.01" className={inputCls + (currency === 'CZK' ? ' bg-gray-50' : '')}
+                  <label className="block text-xs font-medium text-gray-500 mb-1 flex items-center gap-2">
+                    <span>Kurz (Kč / {currency})</span>
+                    {cnbLoading && <span className="text-gray-400 text-xs">načítám ČNB…</span>}
+                    {cnbDate && !cnbLoading && <span className="text-gray-400 text-xs font-normal">ČNB {cnbDate}</span>}
+                  </label>
+                  <input type="number" step="0.0001" className={inputCls + (currency === 'CZK' ? ' bg-gray-50' : '')}
                     value={currValue} onChange={e => setCurrValue(e.target.value)} disabled={currency === 'CZK'}/>
                 </div>
                 <div>
@@ -305,7 +324,7 @@ export function InvoiceFormModal({ invoiceKey, companyKey, prefill, onClose, onS
                     <thead>
                       <tr className="bg-gray-50 text-gray-500 uppercase text-left">
                         <th className="px-2 py-2 font-medium">Název</th>
-                        <th className="px-2 py-2 font-medium text-right w-24">Cena/{currSymbol}</th>
+                        <th className="px-2 py-2 font-medium text-right w-24">Cena/ks</th>
                         <th className="px-2 py-2 font-medium text-right w-14">Sl.%</th>
                         <th className="px-2 py-2 font-medium text-right w-14">Počet</th>
                         <th className="px-2 py-2 font-medium text-right w-14">DPH%</th>
@@ -360,8 +379,35 @@ export function InvoiceFormModal({ invoiceKey, companyKey, prefill, onClose, onS
               </div>
 
               {/* Rekapitulace */}
-              <div className="flex justify-end">
-                <div className="text-sm space-y-1 text-right min-w-[180px]">
+              <div className="flex justify-between items-start gap-4">
+                {proformaData ? (
+                  <div className="bg-purple-50 border border-purple-100 rounded-xl px-4 py-3 text-xs space-y-1 min-w-0 flex-1">
+                    <div className="font-semibold text-purple-800 mb-1.5">
+                      Záloha {proformaData.series}{proformaData.number != null ? `/${proformaData.number}` : ''}
+                      {proformaData.company && <span className="ml-2 font-normal text-purple-600">{proformaData.company}</span>}
+                    </div>
+                    {[
+                      ['Vystaveno',    formatDate(proformaData.issued)],
+                      ['Splatnost',    formatDate(proformaData.maturity)],
+                      ['Uhrazeno',     formatDate(proformaData.settlement)],
+                      ['Vozidla',      proformaData.car_num != null ? String(proformaData.car_num) : null],
+                      ['Měsíce',       proformaData.quantity != null ? String(proformaData.quantity) : null],
+                      ['Celkem',       proformaData.curr_total != null
+                                         ? `${formatNumber(proformaData.curr_total)} ${proformaData.currency ?? ''}`
+                                         : null],
+                      ['Kurz',         proformaData.exchange_rate && Number(proformaData.exchange_rate) !== 1
+                                         ? String(proformaData.exchange_rate) : null],
+                      ['Způsob platby',proformaData.payment_method],
+                      ['Popis',        proformaData.detail],
+                    ].filter(([, v]) => v).map(([label, value]) => (
+                      <div key={label as string} className="flex gap-2">
+                        <span className="text-purple-500 shrink-0 w-28">{label}</span>
+                        <span className="text-purple-900 font-medium">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div />}
+                <div className="text-sm space-y-1 text-right min-w-[180px] shrink-0">
                   <div className="flex justify-between gap-8 text-gray-500">
                     <span>Základ</span>
                     <span className="font-medium text-gray-800 tabular-nums">{formatNumber(totals.net)} {currSymbol}</span>
@@ -378,7 +424,7 @@ export function InvoiceFormModal({ invoiceKey, companyKey, prefill, onClose, onS
                     <div className="text-xs text-gray-400 text-right">{formatNumber(Math.round(totals.total * rate * 100) / 100)} Kč</div>
                   )}
                 </div>
-              </div>
+              </div> {/* end flex justify-between */}
 
               {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
             </>

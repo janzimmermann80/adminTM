@@ -227,16 +227,28 @@ export const InvoicePrint = () => {
           {/* DPH skupiny */}
           {vatRates.map(rate => (
             <div key={rate} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', gap: 24 }}>
-              <span style={{ color: GRAY, fontSize: 10.5 }}>Základ daně</span>
-              <span style={{ fontSize: 10.5 }}>{fmtNum(vatMap[rate].base)} {inv.currency}</span>
+              <span style={{ color: GRAY, fontSize: 10.5, textAlign: 'right', flex: 1 }}>Základ daně</span>
+              <span style={{ fontSize: 10.5, whiteSpace: 'nowrap' }}>{fmtNum(vatMap[rate].base)} {inv.currency}</span>
             </div>
           ))}
           {vatRates.map(rate => (
             <div key={`vat-${rate}`} style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', gap: 24 }}>
-              <span style={{ color: GRAY, fontSize: 10.5 }}>DPH {rate} %</span>
-              <span style={{ fontSize: 10.5 }}>{fmtNum(vatMap[rate].vat)} {inv.currency}</span>
+              <span style={{ color: GRAY, fontSize: 10.5, textAlign: 'right', flex: 1 }}>DPH {rate} %</span>
+              <span style={{ fontSize: 10.5, whiteSpace: 'nowrap' }}>{fmtNum(vatMap[rate].vat)} {inv.currency}</span>
             </div>
           ))}
+
+          {/* Odpočet zálohy */}
+          {!!inv.proforma_number && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', gap: 24, marginTop: 4 }}>
+                <span style={{ color: DARK, fontSize: 11 }}>
+                  Odpočet zálohy poskytnuté na základě zálohové faktury č.&nbsp;{inv.proforma_number}
+                </span>
+                <span style={{ fontSize: 11, whiteSpace: 'nowrap' }}>-{fmtNum(total)} {inv.currency}</span>
+              </div>
+            </>
+          )}
 
           {/* Celkem k úhradě */}
           <div style={{
@@ -245,9 +257,21 @@ export const InvoicePrint = () => {
           }}>
             <span style={{ fontSize: 14.5, fontWeight: 700, color: DARK }}>Celkem k úhradě</span>
             <div style={{ fontSize: 19, fontWeight: 700, color: DARK, whiteSpace: 'nowrap' }}>
-              {fmtNum(total)} {inv.currency}
+              {inv.proforma_number ? `0,00` : fmtNum(total)} {inv.currency}
             </div>
           </div>
+          {inv.currency === 'EUR' && inv.rate && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', gap: 24, marginTop: 4 }}>
+                <span style={{ color: GRAY, fontSize: 10.5, textAlign: 'right', flex: 1 }}>Použitý kurz EUR/CZK</span>
+                <span style={{ fontSize: 10.5, whiteSpace: 'nowrap' }}>{fmtNum(inv.rate, 4)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '3px 0', gap: 24 }}>
+                <span style={{ color: GRAY, fontSize: 10.5, textAlign: 'right', flex: 1 }}>Celkem v CZK</span>
+                <span style={{ fontSize: 10.5, whiteSpace: 'nowrap' }}>{fmtNum(inv.total)} Kč</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
