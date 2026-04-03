@@ -715,6 +715,43 @@ else:
     print('Patch SKIP: invoicePdf margin already set', file=sys.stderr)
 PYEOF
 
+# Stáhni Liberation fonty pro headless Chrome (pokud chybí)
+if [ ! -f /home/dev/.local/share/fonts/LiberationSans-Regular.ttf ]; then
+  mkdir -p /home/dev/.local/share/fonts
+  curl -sL "https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz" -o /tmp/liberation.tar.gz \
+    && tar -xzf /tmp/liberation.tar.gz -C /tmp/ \
+    && cp /tmp/liberation-fonts-ttf-2.1.5/*.ttf /home/dev/.local/share/fonts/ \
+    && rm -rf /tmp/liberation.tar.gz /tmp/liberation-fonts-ttf-2.1.5 \
+    && echo "Fonts OK: Liberation fonts installed" >&2 \
+    || echo "Fonts FAIL: could not download Liberation fonts" >&2
+else
+  echo "Fonts SKIP: Liberation fonts already present" >&2
+fi
+
+# Patch: invoicePdf.ts — inject Liberation fonts pro headless Chrome (nemá systémové fonty)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/services/invoicePdf.ts'
+src = open(f).read()
+old = "    await page.waitForSelector('[data-invoice-ready]', { timeout: 10000 })\n    const pdf = await page.pdf({"
+new = """    await page.waitForSelector('[data-invoice-ready]', { timeout: 10000 })
+    // Inject fonts — headless Chrome v kontejneru nemá systémové fonty
+    await page.addStyleTag({ content: `
+      @font-face { font-family: 'Arial'; font-weight: 400; src: url('file:///home/dev/.local/share/fonts/LiberationSans-Regular.ttf'); }
+      @font-face { font-family: 'Arial'; font-weight: 700; src: url('file:///home/dev/.local/share/fonts/LiberationSans-Bold.ttf'); }
+      @font-face { font-family: 'Helvetica'; font-weight: 400; src: url('file:///home/dev/.local/share/fonts/LiberationSans-Regular.ttf'); }
+    ` })
+    await page.waitForFunction(() => document.fonts.ready)
+    const pdf = await page.pdf({"""
+if 'LiberationSans' in src:
+    print('Patch SKIP: invoicePdf font inject already present', file=sys.stderr)
+elif old in src:
+    open(f, 'w').write(src.replace(old, new, 1))
+    print('Patch OK: invoicePdf font inject', file=sys.stderr)
+else:
+    print('Patch FAIL: invoicePdf font inject — anchor not found', file=sys.stderr)
+PYEOF
+
 # Patch: bankDb.ts — přesuň DB do /home/dev/ (bank.db v /services/admin-data je root-owned)
 python3 - <<'PYEOF'
 import sys
@@ -2077,7 +2114,7 @@ python3 - <<'PYEOF'
 import sys
 f = '/services/admin-data/patched/src/routes/statistics.ts'
 src = open(f).read()
-anchor = '  // GET /api/statistics/lent-access-stats'
+anchor = '  // GET /api/statistics/lent-monthly'
 insert = '''  // GET /api/statistics/orders-monthly — zakázky dle měsíce (posledních 36 měsíců)
   app.get('/orders-monthly', {
     onRequest: [(app as any).authenticate],
@@ -2087,21 +2124,22 @@ insert = '''  // GET /api/statistics/orders-monthly — zakázky dle měsíce (p
     try {
       const rows = await sql`
         SELECT to_char(date_trunc('month', created_time), 'YYYY-MM') AS month,
-               count(*)::int AS count
+               count(*)::int AS count,
+               count(*) FILTER (WHERE web_origin = 'D')::int AS digital
         FROM ta.obligation_base
         WHERE created_time >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
         GROUP BY date_trunc('month', created_time)
         ORDER BY month
       `
-      const byMonth = {}
-      for (const r of rows) byMonth[r.month] = r.count
+      const byMonth: Record<string, { count: number; digital: number }> = {}
+      for (const r of rows) byMonth[r.month] = { count: r.count, digital: r.digital }
       const result = []
       for (let i = 35; i >= 0; i--) {
         const d = new Date()
         d.setDate(1)
         d.setMonth(d.getMonth() - i)
         const key = d.toISOString().slice(0, 7)
-        result.push({ month: key, count: byMonth[key] ?? 0 })
+        result.push({ month: key, count: byMonth[key]?.count ?? 0, digital: byMonth[key]?.digital ?? 0 })
       }
       return reply.send(result)
     } finally {
@@ -2154,37 +2192,7 @@ else:
     print('Patch SKIP: lent-access-stats already present or anchor not found', file=sys.stderr)
 PYEOF
 
-# Patch: statistics.ts — orders-monthly přidej digital (web_origin)
-python3 - <<'PYEOF'
-import sys
-f = '/services/admin-data/patched/src/routes/statistics.ts'
-src = open(f).read()
-old = """        SELECT to_char(date_trunc('month', created_time), 'YYYY-MM') AS month,
-               count(*)::int AS count
-        FROM ta.obligation_base
-        WHERE created_time >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
-        GROUP BY date_trunc('month', created_time)
-        ORDER BY month"""
-new = """        SELECT to_char(date_trunc('month', created_time), 'YYYY-MM') AS month,
-               count(*)::int AS count,
-               count(*) FILTER (WHERE web_origin = 'D')::int AS digital
-        FROM ta.obligation_base
-        WHERE created_time >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
-        GROUP BY date_trunc('month', created_time)
-        ORDER BY month"""
-old2 = "      const byMonth: Record<string, number> = {}\n      for (const r of rows) byMonth[r.month] = r.count\n      const result = []\n      for (let i = 35; i >= 0; i--) {\n        const d = new Date()\n        d.setDate(1)\n        d.setMonth(d.getMonth() - i)\n        const key = d.toISOString().slice(0, 7)\n        result.push({ month: key, count: byMonth[key] ?? 0 })\n      }"
-new2 = "      const byMonth: Record<string, { count: number; digital: number }> = {}\n      for (const r of rows) byMonth[r.month] = { count: r.count, digital: r.digital }\n      const result = []\n      for (let i = 35; i >= 0; i--) {\n        const d = new Date()\n        d.setDate(1)\n        d.setMonth(d.getMonth() - i)\n        const key = d.toISOString().slice(0, 7)\n        result.push({ month: key, count: byMonth[key]?.count ?? 0, digital: byMonth[key]?.digital ?? 0 })\n      }"
-changed = False
-if old in src:
-    src = src.replace(old, new); changed = True
-if old2 in src:
-    src = src.replace(old2, new2); changed = True
-if changed:
-    open(f, 'w').write(src)
-    print('Patch OK: orders-monthly digital field', file=sys.stderr)
-else:
-    print('Patch SKIP: orders-monthly digital already present', file=sys.stderr)
-PYEOF
+# Patch: statistics.ts — orders-monthly digital (sloučeno do hlavního patche výše)
 
 # Patch: statistics.ts — přidej invoice-base-monthly endpoint (ta.invoice_base)
 python3 - <<'PYEOF'
