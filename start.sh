@@ -2409,6 +2409,46 @@ else:
     print('Patch SKIP: impersonate already in companies/index.ts', file=sys.stderr)
 PYEOF
 
+# Patch: companies/index.ts — extend-access endpoint (prodloužení přístupu o months * 30 dní)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+if 'extend-access' in src:
+    print('Patch SKIP: extend-access already in companies/index.ts', file=sys.stderr)
+else:
+    insert = '''
+  // POST /api/companies/:id/extend-access — prodlouží admittance_date o months * 30 dní
+  app.post('/:id/extend-access', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    const { months } = request.body as { months: number }
+    const days = Math.round(months * 30)
+    try {
+      const rows = await sql`
+        UPDATE provider.company_detail
+        SET admittance_date = GREATEST(COALESCE(admittance_date, CURRENT_DATE), CURRENT_DATE) + (${days} * INTERVAL '1 day')
+        WHERE company_key = ${id}
+        RETURNING admittance_date
+      `
+      return reply.send({ admittance_date: rows[0]?.admittance_date ?? null })
+    } finally {
+      await sql.end()
+    }
+  })
+
+'''
+    anchor = "  // GET /api/companies/:id/impersonate"
+    if anchor in src:
+        open(f, 'w').write(src.replace(anchor, insert + anchor))
+        print('Patch OK: companies/index.ts — extend-access endpoint added', file=sys.stderr)
+    else:
+        print('Patch FAIL: companies/index.ts — impersonate anchor not found', file=sys.stderr)
+PYEOF
+
 # Patch: bank.ts — přidat vs_company_key (resolve firmy z VS pro oba GET endpointy, proforma i regulérní)
 python3 << 'PYEOF'
 import sys
@@ -2461,14 +2501,29 @@ else:
 
     old2 = '''      const result = transactions.map(t => ({
         ...t,
-        invoice_number:     invoiceMap[t.matched_invoice_id]?.number ?? null,
-        invoice_year:       invoiceMap[t.matched_invoice_id]?.year ?? null,
-        invoice_total:      invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_number:      invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:        invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:       invoiceMap[t.matched_invoice_id]?.total ?? null,
         invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
         invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
         invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
       }))'''
-    new2 = '''      // Resolve company_key z VS: proforma (VS[0]='5', suffix=VS[2..6]) nebo regulérní (suffix=VS[1..5])
+    new2 = '''      // Resolve proforma_issued_invoice: faktura vystavená k záloze (proforma_number = tx.vs)
+      const proformaTxs2 = transactions.filter((t: any) => t.vs?.charAt(0) === '5' && t.vs.length >= 8)
+      const proformaInvoiceMap2: Record<string, any> = {}
+      if (proformaTxs2.length > 0) {
+        const vsNums2 = [...new Set(proformaTxs2.map((t: any) => parseInt(t.vs)).filter((n: number) => !isNaN(n)))]
+        const proformaInvoices2 = await pgSql`
+          SELECT i.invoice_key, i.number, i.year, i.settlement, i.company_key, i.proforma_number, c.company
+          FROM provider.invoice i
+          LEFT JOIN provider.company c ON i.company_key = c.company_key
+          WHERE i.proforma_number = ANY(${vsNums2})
+            AND i.cancellation IS NULL
+        `
+        for (const inv of proformaInvoices2) proformaInvoiceMap2[String(inv.proforma_number)] = inv
+      }
+
+      // Resolve company_key z VS: proforma (VS[0]='5', suffix=VS[2..6]) nebo regulérní (suffix=VS[1..5])
       const vsTxsAll2 = transactions.filter((t: any) => t.vs && t.vs.length >= 6)
       const vsCompanyMap2: Record<string, number> = {}
       if (vsTxsAll2.length > 0) {
@@ -2485,19 +2540,25 @@ else:
 
       const result = transactions.map(t => ({
         ...t,
-        invoice_number:     invoiceMap[t.matched_invoice_id]?.number ?? null,
-        invoice_year:       invoiceMap[t.matched_invoice_id]?.year ?? null,
-        invoice_total:      invoiceMap[t.matched_invoice_id]?.total ?? null,
+        invoice_number:      invoiceMap[t.matched_invoice_id]?.number ?? null,
+        invoice_year:        invoiceMap[t.matched_invoice_id]?.year ?? null,
+        invoice_total:       invoiceMap[t.matched_invoice_id]?.total ?? null,
         invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
         invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
         invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
         vs_company_key:      t.vs?.length >= 6
           ? (vsCompanyMap2[t.vs[0] === '5' && t.vs.length >= 8 ? t.vs.slice(2, 7) : t.vs.slice(1, 6)] ?? null)
           : null,
+        proforma_issued_invoice: t.vs ? (proformaInvoiceMap2[t.vs] ?? null) : null,
       }))'''
 
     if old1 in src and old2 in src:
         src = src.replace(old1, new1).replace(old2, new2)
+        # Zvýšení limitu transakcí na 500
+        src = src.replace(
+            'const limit = Math.min(Number(q.limit ?? 50), 200)',
+            'const limit = Math.min(Number(q.limit ?? 50), 500)',
+        )
         open(f, 'w').write(src)
         print('Patch OK: bank.ts — vs_company_key added (proforma + regular VS)', file=sys.stderr)
     else:
@@ -2520,8 +2581,11 @@ else:
     print('Patch FAIL: camt053Parser — plain numeric VS anchor not found', file=sys.stderr)
 PYEOF
 
+# Aktualizuj proxy.php na port 3002
+sed -i 's|http://localhost:[0-9]*/api|http://localhost:3002/api|g' /services/admin-www/proxy.php 2>/dev/null || true
+
 # Spusť backend z patchované kopie
 cd "$MYDIR"
-exec node /services/admin-data/node_modules/.bin/tsx watch \
+exec PORT=3002 node /services/admin-data/node_modules/.bin/tsx watch \
   --env-file=/services/admin-data/.env \
   src/index.ts >> /services/admin-data/api.log 2>&1

@@ -106,23 +106,32 @@ export interface Vehicle {
   spz: string
   make: string
   active: boolean
-  production_year?: number
-  tonnage?: number
-  capacity?: number
-  axles?: number
-  euro_emission?: string
-  length?: number
-  width?: number
-  height?: number
-  sim_imsi?: string
+  type?: string | null
+  color?: string | null
+  production_year?: number | null
+  vin?: string | null
+  tonnage?: number | null
+  capacity?: number | null
+  axles?: number | null
+  euro_emission?: string | null
+  length?: number | null
+  width?: number | null
+  height?: number | null
+  engine_power?: number | null
+  tank_volume?: number | null
+  consumption_avg?: number | null
+  adr?: number | null
+  description?: string | null
+  sim_imsi?: string | null
   export_allowed?: boolean
-  driver_key?: number
-  driver2_key?: number
+  export_requested?: boolean
+  driver_key?: number | null
+  driver2_key?: number | null
   stazka_certified?: boolean
-  home_stand_key?: number
-  home_stand_name?: string
-  home_stand_zip?: string
-  home_stand_country?: string
+  home_stand_key?: number | null
+  home_stand_name?: string | null
+  home_stand_zip?: string | null
+  home_stand_country?: string | null
 }
 
 export interface Driver {
@@ -140,14 +149,17 @@ export interface Driver {
 export interface SimCard {
   imsi: string
   number: string
-  tariff: string
-  tariff_name?: string
-  price?: number
+  tariff: string | null
+  tariff_name?: string | null
+  price?: number | null
   our_sim?: boolean
   ie_disabled?: boolean
-  serial_number?: string
-  spz?: string
-  car_key?: number
+  serial_number?: string | null
+  upload_home?: number | null
+  upload_abroad1?: number | null
+  upload_abroad2?: number | null
+  spz?: string | null
+  car_key?: number | null
 }
 
 export interface Note {

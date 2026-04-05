@@ -12,10 +12,11 @@ import { InvoiceEmailModal } from './company/TabInvoices'
 import { CompanyDetailPanel } from './company/CompanyDetailPanel'
 
 // ── Invoice search modal ──────────────────────────────────────────────────────
-function InvoiceSearchModal({ tx, onClose, onMatched }: {
+function InvoiceSearchModal({ tx, onClose, onMatched, onProformaSaved }: {
   tx: any
   onClose: () => void
   onMatched: () => void
+  onProformaSaved?: (invoiceKey: number, proformaData: any, companyKey: number) => void
 }) {
   const isProforma = tx.vs?.charAt(0) === '5'
   const [q, setQ] = useState(isProforma ? (tx.vs ?? '') : (tx.counterparty_name?.trim() ?? tx.vs ?? ''))
@@ -158,7 +159,19 @@ function InvoiceSearchModal({ tx, onClose, onMatched }: {
         prefill={invoiceFormTarget.prefill}
         proformaData={invoiceFormTarget.proformaData}
         onClose={() => setInvoiceFormTarget(null)}
-        onSaved={() => setInvoiceFormTarget(null)}
+        onSaved={async (newInvoiceKey) => {
+          const target = invoiceFormTarget
+          setInvoiceFormTarget(null)
+          if (newInvoiceKey && target.proformaData) {
+            setSaving(true)
+            try {
+              await matchBankTransaction(tx.id, target.companyKey, true)
+            } catch {}
+            finally { setSaving(false) }
+            onProformaSaved?.(newInvoiceKey, target.proformaData, target.companyKey)
+          }
+          onMatched()
+        }}
       />
     )}
   </>
@@ -177,8 +190,14 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onCreat
   const isCredit = tx.credit_debit === 'CRDT'
   const isMatched = !!(tx.matched_invoice_id || tx.matched_company_key)
   const isProforma = tx.vs?.charAt(0) === '5'
+  const issuedInv = tx.proforma_issued_invoice ?? null
+  // Proforma se zobrazuje jako "vyřešená" i když není spárována v DB, pokud existuje vystavená faktura
+  const proformaResolved = isProforma && !!issuedInv
+  const effectivelyMatched = isMatched || proformaResolved
+  const companyKey = tx.invoice_company_key ?? issuedInv?.company_key ?? null
+  const companyName = tx.invoice_company ?? issuedInv?.company ?? null
   return (
-    <tr className={`hover:bg-gray-50 transition-colors ${!isMatched ? 'bg-yellow-50/40' : ''}`}>
+    <tr className={`hover:bg-gray-50 transition-colors ${!effectivelyMatched ? 'bg-yellow-50/40' : ''}`}>
       <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap text-xs">{formatDate(tx.transaction_date)}</td>
       <td className={`px-4 py-2.5 font-mono text-right whitespace-nowrap text-sm font-medium ${isCredit ? 'text-green-700' : 'text-red-600'}`}>
         {isCredit ? '+' : '-'}{formatNumber(tx.amount)} {tx.currency}
@@ -194,11 +213,11 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onCreat
         {tx.counterparty_name || <span className="text-gray-300">—</span>}
       </td>
       <td className="px-4 py-2.5 text-xs">
-        {isMatched ? (
-          <button className="text-left hover:opacity-75 transition-opacity" onClick={() => tx.invoice_company_key && onOpenCompany(tx.invoice_company_key)}>
+        {effectivelyMatched ? (
+          <button className="text-left hover:opacity-75 transition-opacity" onClick={() => companyKey && onOpenCompany(companyKey)}>
             {!isProforma && <div className="font-medium text-teal-700">{tx.invoice_year}/{tx.invoice_number}</div>}
             {isProforma && <div className="font-medium text-purple-700">Záloha</div>}
-            <div className="text-gray-500 truncate max-w-[120px]">{tx.invoice_company}</div>
+            <div className="text-gray-500 truncate max-w-[120px]">{companyName}</div>
           </button>
         ) : (
           <span className="text-amber-600 font-medium">{isProforma ? 'Záloha — nenalezena' : 'Nespárováno'}</span>
@@ -215,22 +234,22 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onCreat
                 </svg>
               </button>
         )}
-        {isMatched && isProforma && (
-          tx.proforma_issued_invoice
-            ? (tx.proforma_issued_invoice.settlement
-                ? <span className="text-green-600 font-medium">{formatDate(tx.proforma_issued_invoice.settlement)}</span>
-                : <span className="text-gray-500 text-xs">Faktura {tx.proforma_issued_invoice.year}/{tx.proforma_issued_invoice.number}</span>
-              )
-            : <button onClick={() => onCreateInvoice(tx)}
-                className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg transition-colors">
-                Vystavit fakturu
-              </button>
+        {isProforma && issuedInv && (
+          issuedInv.settlement
+            ? <span className="text-green-600 font-medium">{formatDate(issuedInv.settlement)}</span>
+            : <span className="text-gray-500 text-xs">Faktura {issuedInv.year}/{issuedInv.number}</span>
+        )}
+        {isMatched && isProforma && !issuedInv && (
+          <button onClick={() => onCreateInvoice(tx)}
+            className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg transition-colors">
+            Vystavit fakturu
+          </button>
         )}
       </td>
       <td className="px-4 py-2.5 text-right">
         {isMatched ? (
           <button onClick={() => onUnmatch(tx.id)} className="text-xs text-gray-400 hover:text-red-500 transition-colors">Odpárovat</button>
-        ) : (
+        ) : proformaResolved ? null : (
           <button onClick={() => onMatch(tx)} className="text-xs bg-teal-600 hover:bg-teal-700 text-white px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap">
             {isProforma ? 'Najít zálohu' : 'Najít fakturu'}
           </button>
@@ -563,6 +582,10 @@ export const Bank = () => {
           tx={matchTarget}
           onClose={() => setMatchTarget(null)}
           onMatched={() => setMatchTarget(null)}
+          onProformaSaved={(invoiceKey, proformaData, companyKey) => {
+            setMatchTarget(null)
+            handleProformaSaved(invoiceKey, proformaData, companyKey)
+          }}
         />
       )}
 

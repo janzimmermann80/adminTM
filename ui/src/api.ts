@@ -135,6 +135,8 @@ export const getVehicles = (id: string) => get<any[]>(`/companies/${id}/vehicles
 export const addVehicle = (id: string, body: Record<string, any>) => post<any>(`/companies/${id}/vehicles`, body)
 export const updateVehicle = (id: string, vid: string, body: Record<string, any>) =>
   put<any>(`/companies/${id}/vehicles/${vid}`, body)
+export const deleteVehicle = (id: string, vid: string) =>
+  del<any>(`/companies/${id}/vehicles/${vid}`)
 
 // drivers
 export const getDrivers = (id: string) => get<any[]>(`/companies/${id}/drivers`)
@@ -146,6 +148,15 @@ export const deleteDriver = (id: string, did: string) => del<any>(`/companies/${
 // simcards
 export const getSimcards = (id: string) => get<any[]>(`/companies/${id}/simcards`)
 export const getSimcardTariffs = (id: string) => get<any[]>(`/companies/${id}/simcard-tariffs`)
+export const addSimcard = (id: string, body: Record<string, any>) => post<any>(`/companies/${id}/simcards`, body)
+export const updateSimcard = (id: string, imsi: string, body: Record<string, any>) =>
+  put<any>(`/companies/${id}/simcards/${encodeURIComponent(imsi)}`, body)
+export const deleteSimcard = (id: string, imsi: string) =>
+  del<any>(`/companies/${id}/simcards/${encodeURIComponent(imsi)}`)
+export const getSimcardUploadLog = (id: string, imsi: string) =>
+  get<any[]>(`/companies/${id}/simcards/${encodeURIComponent(imsi)}/upload-log`)
+export const getSimcardServiceData = (id: string, imsi: string) =>
+  get<any[]>(`/companies/${id}/simcards/${encodeURIComponent(imsi)}/service-data`)
 
 // access
 export const extendAccess = (id: string, months: number) =>
