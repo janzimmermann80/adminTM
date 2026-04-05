@@ -2581,6 +2581,342 @@ else:
     print('Patch FAIL: camt053Parser — plain numeric VS anchor not found', file=sys.stderr)
 PYEOF
 
+# Patch: companies/index.ts — rozšíření vehicles GET/POST/PUT, přidání DELETE vehicle
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+
+# 1. GET vehicles — přidat nová pole
+old_get = """        SELECT C.car_key, C.spz, C.make, NOT C.inactive AS active, C.production_year,
+               C.tonnage, C.capacity, C.axles, C.euro_emission, C.length, C.width, C.height,
+               C.sim_imsi, C.export_allowed, C.driver_key, C.driver2_key,
+               C.stazka_certified, C.home_stand_key,
+               M.name AS home_stand_name, M.zip AS home_stand_zip, M.country AS home_stand_country
+        FROM gps.car_base C
+        LEFT JOIN map.city M ON M.city_key = C.home_stand_key
+        WHERE C.company_key = ${id}
+        ORDER BY C.inactive ASC, C.spz"""
+new_get = """        SELECT C.car_key, C.spz, C.make, NOT C.inactive AS active, C.production_year,
+               C.tonnage, C.capacity, C.axles, C.euro_emission, C.length, C.width, C.height,
+               C.sim_imsi, C.export_allowed, C.export_requested, C.driver_key, C.driver2_key,
+               C.stazka_certified, C.home_stand_key, C.type, C.color, C.vin,
+               C.engine_power, C.tank_volume, C.consumption_avg, C.adr, C.description,
+               M.name AS home_stand_name, M.zip AS home_stand_zip, M.country AS home_stand_country
+        FROM gps.car_base C
+        LEFT JOIN map.city M ON M.city_key = C.home_stand_key
+        WHERE C.company_key = ${id}
+        ORDER BY C.inactive ASC, C.spz"""
+
+# 2. POST vehicles — rozšířit body + INSERT
+old_post = """    const body = request.body as {
+      spz: string; make?: string; tonnage?: number; capacity?: number
+      euro_emission?: string; axles?: number; stazka_certified?: boolean; home_stand_key?: number
+    }
+
+    try {
+      const [row] = await sql`
+        INSERT INTO gps.car_base (company_key, spz, make, tonnage, capacity, euro_emission, axles,
+                                  stazka_certified, home_stand_key, inactive)
+        VALUES (${id}, ${body.spz}, ${body.make ?? ''}, ${body.tonnage ?? null},
+                ${body.capacity ?? null}, ${body.euro_emission ?? null}, ${body.axles ?? null},
+                ${body.stazka_certified ?? false}, ${body.home_stand_key ?? null}, false)
+        RETURNING car_key
+      `
+      return reply.code(201).send(row)
+    } finally {
+      await sql.end()
+    }
+  })"""
+new_post = """    const body = request.body as {
+      spz: string; make?: string; type?: string; color?: string; production_year?: number | null
+      vin?: string; tonnage?: number | null; capacity?: number | null
+      euro_emission?: string | null; axles?: number | null; stazka_certified?: boolean
+      home_stand_key?: number | null; engine_power?: number | null; tank_volume?: number | null
+      consumption_avg?: number | null; adr?: number | null; description?: string
+      driver_key?: number | null; driver2_key?: number | null; export_allowed?: boolean
+    }
+
+    try {
+      const [row] = await sql`
+        INSERT INTO gps.car_base (company_key, spz, make, type, color, production_year, vin,
+                                  tonnage, capacity, euro_emission, axles, stazka_certified,
+                                  home_stand_key, engine_power, tank_volume, consumption_avg,
+                                  adr, description, driver_key, driver2_key, export_allowed, inactive)
+        VALUES (${id}, ${body.spz}, ${body.make ?? ''}, ${body.type ?? null}, ${body.color ?? null},
+                ${body.production_year ?? null}, ${body.vin ?? null}, ${body.tonnage ?? null},
+                ${body.capacity ?? null}, ${body.euro_emission ?? null}, ${body.axles ?? null},
+                ${body.stazka_certified ?? false}, ${body.home_stand_key ?? null},
+                ${body.engine_power ?? null}, ${body.tank_volume ?? null},
+                ${body.consumption_avg ?? null}, ${body.adr ?? null}, ${body.description ?? null},
+                ${body.driver_key ?? null}, ${body.driver2_key ?? null},
+                ${body.export_allowed ?? false}, false)
+        RETURNING car_key
+      `
+      return reply.code(201).send(row)
+    } finally {
+      await sql.end()
+    }
+  })"""
+
+# 3. PUT vehicles — rozšířit body + UPDATE, přidat DELETE
+old_put = """    const body = request.body as {
+      spz?: string; make?: string; tonnage?: number | null; capacity?: number | null
+      euro_emission?: string | null; axles?: number | null; active?: boolean
+      stazka_certified?: boolean; home_stand_key?: number | null
+    }
+
+    try {
+      await sql`
+        UPDATE gps.car_base SET
+          spz               = COALESCE(${body.spz ?? null}, spz),
+          make              = COALESCE(${body.make ?? null}, make),
+          tonnage           = ${body.tonnage !== undefined ? body.tonnage : sql`tonnage`},
+          capacity          = ${body.capacity !== undefined ? body.capacity : sql`capacity`},
+          euro_emission     = ${body.euro_emission !== undefined ? body.euro_emission : sql`euro_emission`},
+          axles             = ${body.axles !== undefined ? body.axles : sql`axles`},
+          inactive          = ${body.active !== undefined ? !body.active : sql`inactive`},
+          stazka_certified  = ${body.stazka_certified !== undefined ? body.stazka_certified : sql`stazka_certified`},
+          home_stand_key    = ${body.home_stand_key !== undefined ? body.home_stand_key : sql`home_stand_key`}
+        WHERE car_key = ${vid}
+      `
+      return reply.send({ success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/companies/:id/drivers"""
+new_put = """    const body = request.body as {
+      spz?: string; make?: string; type?: string | null; color?: string | null
+      production_year?: number | null; vin?: string | null
+      tonnage?: number | null; capacity?: number | null
+      euro_emission?: string | null; axles?: number | null; active?: boolean
+      stazka_certified?: boolean; home_stand_key?: number | null
+      engine_power?: number | null; tank_volume?: number | null
+      consumption_avg?: number | null; adr?: number | null; description?: string | null
+      driver_key?: number | null; driver2_key?: number | null
+      export_allowed?: boolean; export_requested?: boolean
+    }
+
+    const b = body
+    try {
+      await sql`
+        UPDATE gps.car_base SET
+          spz               = COALESCE(${b.spz ?? null}, spz),
+          make              = COALESCE(${b.make ?? null}, make),
+          type              = ${b.type !== undefined ? b.type : sql`type`},
+          color             = ${b.color !== undefined ? b.color : sql`color`},
+          production_year   = ${b.production_year !== undefined ? b.production_year : sql`production_year`},
+          vin               = ${b.vin !== undefined ? b.vin : sql`vin`},
+          tonnage           = ${b.tonnage !== undefined ? b.tonnage : sql`tonnage`},
+          capacity          = ${b.capacity !== undefined ? b.capacity : sql`capacity`},
+          euro_emission     = ${b.euro_emission !== undefined ? b.euro_emission : sql`euro_emission`},
+          axles             = ${b.axles !== undefined ? b.axles : sql`axles`},
+          inactive          = ${b.active !== undefined ? !b.active : sql`inactive`},
+          stazka_certified  = ${b.stazka_certified !== undefined ? b.stazka_certified : sql`stazka_certified`},
+          home_stand_key    = ${b.home_stand_key !== undefined ? b.home_stand_key : sql`home_stand_key`},
+          engine_power      = ${b.engine_power !== undefined ? b.engine_power : sql`engine_power`},
+          tank_volume       = ${b.tank_volume !== undefined ? b.tank_volume : sql`tank_volume`},
+          consumption_avg   = ${b.consumption_avg !== undefined ? b.consumption_avg : sql`consumption_avg`},
+          adr               = ${b.adr !== undefined ? b.adr : sql`adr`},
+          description       = ${b.description !== undefined ? b.description : sql`description`},
+          driver_key        = ${b.driver_key !== undefined ? b.driver_key : sql`driver_key`},
+          driver2_key       = ${b.driver2_key !== undefined ? b.driver2_key : sql`driver2_key`},
+          export_allowed    = ${b.export_allowed !== undefined ? b.export_allowed : sql`export_allowed`},
+          export_requested  = ${b.export_requested !== undefined ? b.export_requested : sql`export_requested`}
+        WHERE car_key = ${vid}
+      \`
+      return reply.send({ success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // DELETE /api/companies/:id/vehicles/:vid - delete vehicle
+  app.delete('/:id/vehicles/:vid', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { vid } = request.params as { id: string; vid: string }
+    try {
+      await sql\`DELETE FROM gps.car_base WHERE car_key = ${vid}\`
+      return reply.send({ success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/companies/:id/drivers"""
+
+changed = False
+if 'export_requested  = ${b.export_requested' in src:
+    print('Patch SKIP: companies/index.ts — vehicles already patched', file=sys.stderr)
+else:
+    if old_get in src: src = src.replace(old_get, new_get); changed = True
+    else: print('Patch WARN: vehicles GET anchor not found', file=sys.stderr)
+    if old_post in src: src = src.replace(old_post, new_post); changed = True
+    else: print('Patch WARN: vehicles POST anchor not found', file=sys.stderr)
+    if old_put in src: src = src.replace(old_put, new_put); changed = True
+    else: print('Patch WARN: vehicles PUT anchor not found', file=sys.stderr)
+    if changed:
+        open(f, 'w').write(src)
+        print('Patch OK: companies/index.ts — vehicles GET/POST/PUT extended, DELETE added', file=sys.stderr)
+PYEOF
+
+# Patch: companies/index.ts — PUT drivers přidat adr
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+old = "    const body = request.body as { name?: string; phone?: string; active?: boolean; wage_km?: number | null; wage_hourly?: number | null; currency?: string }\n\n    try {\n      await sql`\n        UPDATE gps.driver_base SET\n          name        = COALESCE(${body.name ?? null}, name),\n          phone       = COALESCE(${body.phone ?? null}, phone),\n          active      = COALESCE(${body.active ?? null}, active),\n          wage_km     = ${body.wage_km !== undefined ? body.wage_km : sql`wage_km`},\n          wage_hourly = ${body.wage_hourly !== undefined ? body.wage_hourly : sql`wage_hourly`},\n          currency    = COALESCE(${body.currency ?? null}, currency)\n        WHERE driver_key = ${did}"
+new = "    const body = request.body as { name?: string; phone?: string; active?: boolean; adr?: boolean; wage_km?: number | null; wage_hourly?: number | null; currency?: string }\n\n    try {\n      await sql`\n        UPDATE gps.driver_base SET\n          name        = COALESCE(${body.name ?? null}, name),\n          phone       = COALESCE(${body.phone ?? null}, phone),\n          active      = COALESCE(${body.active ?? null}, active),\n          adr         = ${body.adr !== undefined ? body.adr : sql`adr`},\n          wage_km     = ${body.wage_km !== undefined ? body.wage_km : sql`wage_km`},\n          wage_hourly = ${body.wage_hourly !== undefined ? body.wage_hourly : sql`wage_hourly`},\n          currency    = COALESCE(${body.currency ?? null}, currency)\n        WHERE driver_key = ${did}"
+if 'adr         = ${body.adr' in src:
+    print('Patch SKIP: companies/index.ts — drivers PUT adr already present', file=sys.stderr)
+elif old in src:
+    open(f, 'w').write(src.replace(old, new, 1))
+    print('Patch OK: companies/index.ts — drivers PUT adr added', file=sys.stderr)
+else:
+    print('Patch FAIL: companies/index.ts — drivers PUT anchor not found', file=sys.stderr)
+PYEOF
+
+# Patch: companies/index.ts — simcards GET/PUT rozšíření, POST nová SIM
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+
+# 1. GET simcards
+old_get = """        SELECT SB.imsi, SB.number, SB.tariff, ST.name AS tariff_name, SB.price,
+               SB.our_sim, SB.ie_disabled, SB.serial_number, CB.spz, CB.car_key
+        FROM gps.simcard_base SB
+        LEFT JOIN gps.simcard_tariff ST ON SB.tariff = ST.tariff
+        LEFT JOIN gps.car_base CB ON CB.sim_imsi = SB.imsi
+        WHERE SB.company_key = ${id}
+        ORDER BY SB.imsi"""
+new_get = """        SELECT SB.imsi, SB.number, SB.tariff, ST.name AS tariff_name, SB.price,
+               SB.our_sim, SB.ie_disabled, SB.serial_number,
+               SB.upload_home, SB.upload_abroad1, SB.upload_abroad2,
+               CB.spz, CB.car_key
+        FROM gps.simcard_base SB
+        LEFT JOIN gps.simcard_tariff ST ON SB.tariff = ST.tariff
+        LEFT JOIN gps.car_base CB ON CB.sim_imsi = SB.imsi
+        WHERE SB.company_key = ${id}
+        ORDER BY SB.number"""
+
+# 2. PUT simcards
+old_put = """    const body = request.body as {
+      imsi?: string
+      number?: string
+      price?: number | null
+      our_sim?: boolean
+      ie_disabled?: boolean
+    }
+
+    try {
+      await sql`
+        UPDATE gps.simcard_base SET
+          imsi        = COALESCE(${body.imsi ?? null}, imsi),
+          number      = COALESCE(${body.number ?? null}, number),
+          price       = ${body.price !== undefined ? body.price : sql`price`},
+          our_sim     = COALESCE(${body.our_sim ?? null}, our_sim),
+          ie_disabled = COALESCE(${body.ie_disabled ?? null}, ie_disabled)
+        WHERE imsi = ${imsi} AND company_key = ${id}"""
+new_put = """    const body = request.body as {
+      number?: string; price?: number | null; tariff?: string | null
+      our_sim?: boolean; ie_disabled?: boolean; serial_number?: string | null
+      upload_home?: number | null; upload_abroad1?: number | null; upload_abroad2?: number | null
+    }
+
+    try {
+      await sql`
+        UPDATE gps.simcard_base SET
+          number         = COALESCE(${body.number ?? null}, number),
+          tariff         = COALESCE(${body.tariff ?? null}, tariff),
+          price          = ${body.price !== undefined ? body.price : sql`price`},
+          our_sim        = COALESCE(${body.our_sim ?? null}, our_sim),
+          ie_disabled    = COALESCE(${body.ie_disabled ?? null}, ie_disabled),
+          serial_number  = ${body.serial_number !== undefined ? body.serial_number : sql`serial_number`},
+          upload_home    = ${body.upload_home !== undefined ? body.upload_home : sql`upload_home`},
+          upload_abroad1 = ${body.upload_abroad1 !== undefined ? body.upload_abroad1 : sql`upload_abroad1`},
+          upload_abroad2 = ${body.upload_abroad2 !== undefined ? body.upload_abroad2 : sql`upload_abroad2`}
+        WHERE imsi = ${imsi} AND company_key = ${id}"""
+
+# 3. POST simcards — vložit před DELETE
+old_delete = "  // DELETE /api/companies/:id/simcards/:imsi\n  app.delete('/:id/simcards/:imsi',"
+new_delete = """  // POST /api/companies/:id/simcards - new SIM
+  app.post('/:id/simcards', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    const body = request.body as {
+      imsi: string; number?: string; tariff?: string; price?: number | null
+      our_sim?: boolean; ie_disabled?: boolean; serial_number?: string | null
+      upload_home?: number | null; upload_abroad1?: number | null; upload_abroad2?: number | null
+    }
+    try {
+      await sql`
+        INSERT INTO gps.simcard_base
+          (imsi, number, company_key, tariff, price, our_sim, ie_disabled, serial_number,
+           upload_home, upload_abroad1, upload_abroad2)
+        VALUES
+          (${body.imsi}, ${body.number ?? ''}, ${id}, ${body.tariff ?? null},
+           ${body.price ?? null}, ${body.our_sim ?? false}, ${body.ie_disabled ?? false},
+           ${body.serial_number ?? null}, ${body.upload_home ?? null},
+           ${body.upload_abroad1 ?? null}, ${body.upload_abroad2 ?? null})
+      \`
+      return reply.code(201).send({ imsi: body.imsi })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // DELETE /api/companies/:id/simcards/:imsi
+  app.delete('/:id/simcards/:imsi',"""
+
+changed = False
+if 'upload_abroad2 = ${body.upload_abroad2' in src:
+    print('Patch SKIP: companies/index.ts — simcards already patched', file=sys.stderr)
+else:
+    if old_get in src: src = src.replace(old_get, new_get); changed = True
+    else: print('Patch WARN: simcards GET anchor not found', file=sys.stderr)
+    if old_put in src: src = src.replace(old_put, new_put); changed = True
+    else: print('Patch WARN: simcards PUT anchor not found', file=sys.stderr)
+    if old_delete in src: src = src.replace(old_delete, new_delete, 1); changed = True
+    else: print('Patch WARN: simcards DELETE anchor not found', file=sys.stderr)
+    if changed:
+        open(f, 'w').write(src)
+        print('Patch OK: companies/index.ts — simcards GET/PUT extended, POST added', file=sys.stderr)
+PYEOF
+
+# Patch: companies/index.ts — upload-log přidat connection, service-data přidat city + extra pole
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+
+old_upload = "        SELECT log_key, time, gsmnet, gsmnet_id, method, file_size, overhead_size,\n               position_recs, service_recs, message_recs, ip_addr, ip_port,\n               version, program_ver, pda_imei, detail\n        FROM gps.upload_log"
+new_upload = "        SELECT log_key, time, gsmnet, gsmnet_id, connection, method, file_size, overhead_size,\n               position_recs, service_recs, message_recs, ip_addr, ip_port,\n               version, program_ver, pda_imei, detail\n        FROM gps.upload_log"
+
+old_service = "        SELECT S.service_key, S.time, S.descr, S.code,\n               D.name AS driver_name\n        FROM gps.service_base S\n        LEFT JOIN gps.driver_base D ON S.driver_key = D.driver_key\n        WHERE S.car_key = ${cars[0].car_key} AND S.code = 'TST'"
+new_service = "        SELECT S.service_key, S.time, S.descr, S.code, S.type,\n               S.pos_gps, S.price, S.liter,\n               D.name AS driver_name,\n               C.name AS city_name\n        FROM gps.service_base S\n        LEFT JOIN gps.driver_base D ON S.driver_key = D.driver_key\n        LEFT JOIN map.city C ON S.city_key = C.city_key\n        WHERE S.car_key = ${cars[0].car_key} AND S.code = 'TST'"
+
+changed = False
+if 'connection, method, file_size' in src:
+    print('Patch SKIP: companies/index.ts — upload-log + service-data already patched', file=sys.stderr)
+else:
+    if old_upload in src: src = src.replace(old_upload, new_upload); changed = True
+    else: print('Patch WARN: upload-log anchor not found', file=sys.stderr)
+    if old_service in src: src = src.replace(old_service, new_service); changed = True
+    else: print('Patch WARN: service-data anchor not found', file=sys.stderr)
+    if changed:
+        open(f, 'w').write(src)
+        print('Patch OK: companies/index.ts — upload-log connection + service-data city/fields added', file=sys.stderr)
+PYEOF
+
 # Aktualizuj proxy.php na port 3002
 sed -i 's|http://localhost:[0-9]*/api|http://localhost:3002/api|g' /services/admin-www/proxy.php 2>/dev/null || true
 
