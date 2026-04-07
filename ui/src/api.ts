@@ -107,6 +107,8 @@ export const upsertUserAccount = (id: string, body: Record<string, any>) => put<
 // invoices
 export const getInvoices = (id: string, offset = 0, limit = 10) =>
   get<{ total: number; data: any[] }>(`/companies/${id}/invoices?limit=${limit}&offset=${offset}`)
+export const getUnpaidInvoicesCount = (companyKey: string) =>
+  get<{ count: number }>(`/companies/${companyKey}/invoices/count-unpaid`)
 export const getInvoiceDetail = (id: string) => get<any>(`/invoicing/${id}`)
 export const getInvoiceEmailContacts = (id: string) => get<string[]>(`/invoicing/${id}/email-contacts`)
 export const sendInvoiceEmail = (id: string, body: { to: string; cc?: string; subject: string; body: string }) =>

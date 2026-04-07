@@ -2917,6 +2917,44 @@ else:
         print('Patch OK: companies/index.ts — upload-log connection + service-data city/fields added', file=sys.stderr)
 PYEOF
 
+# Patch: companies/index.ts — count-unpaid invoices endpoint
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/companies/index.ts'
+src = open(f).read()
+insert = """
+  // GET /api/companies/:id/invoices/count-unpaid — počet neuhrazených faktur
+  app.get('/:id/invoices/count-unpaid', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    try {
+      const [{ count }] = await sql\`
+        SELECT count(*)::int AS count
+        FROM provider.invoice
+        WHERE company_key = \${id}
+          AND settlement IS NULL
+          AND cancellation IS NULL
+      \`
+      return reply.send({ count })
+    } finally {
+      await sql.end()
+    }
+  })
+
+"""
+marker = '  // PUT /api/companies/:id/invoices/:iid - update invoice'
+if 'count-unpaid' in src:
+    print('Patch SKIP: count-unpaid already in companies/index.ts', file=sys.stderr)
+elif marker in src:
+    open(f, 'w').write(src.replace(marker, insert + marker))
+    print('Patch OK: companies/index.ts — count-unpaid endpoint added', file=sys.stderr)
+else:
+    print('Patch WARN: count-unpaid marker not found', file=sys.stderr)
+PYEOF
+
 # Aktualizuj proxy.php na port 3002
 sed -i 's|http://localhost:[0-9]*/api|http://localhost:3002/api|g' /services/admin-www/proxy.php 2>/dev/null || true
 

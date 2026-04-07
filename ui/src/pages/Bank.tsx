@@ -5,7 +5,7 @@ import { formatDate, formatNumber } from '../utils'
 import {
   getBankTransactions, matchBankTransaction, unmatchBankTransaction,
   searchBankInvoices, uploadBankXml, getBankStatements, deleteBankStatement, settleInvoice,
-  extendAccess, addNote, getInvoiceDetail,
+  extendAccess, addNote, getInvoiceDetail, getUnpaidInvoicesCount,
 } from '../api'
 import { InvoiceFormModal } from '../components/InvoiceFormModal'
 import { InvoiceEmailModal } from './company/TabInvoices'
@@ -259,12 +259,14 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onCreat
   )
 }
 
-function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onCreateInvoice }: {
+function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onCreateInvoice, openNewest, onNewestOpened }: {
   onDeleted: () => void
   onMatch: (tx: any) => void
   onUnmatch: (id: number) => void
   onOpenCompany: (companyKey: number) => void
   onCreateInvoice: (tx: any) => void
+  openNewest?: boolean
+  onNewestOpened?: () => void
 }) {
   const [statements, setStatements] = useState<any[]>([])
   const [open, setOpen] = useState<number | null>(null)
@@ -274,7 +276,16 @@ function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onC
   const [dir, setDir] = useState('CRDT')
 
   const loadStatements = async () => {
-    try { setStatements(await getBankStatements()) } catch {}
+    try {
+      const rows = await getBankStatements()
+      setStatements(rows)
+      if (openNewest && rows.length > 0) {
+        const id = rows[0].id
+        setOpen(id)
+        fetchTx(id)
+        onNewestOpened?.()
+      }
+    } catch {}
   }
 
   useEffect(() => { loadStatements() }, [])
@@ -395,6 +406,10 @@ function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onC
                           try {
                             await settleInvoice(String(tx.matched_invoice_id), tx.transaction_date)
                             refreshTx(s.id)
+                            if (tx.invoice_company_key) {
+                              const { count } = await getUnpaidInvoicesCount(String(tx.invoice_company_key))
+                              if (count > 0) onOpenCompany(tx.invoice_company_key)
+                            }
                           } catch (e: any) { alert(e.message) }
                         }}
                       />
@@ -416,6 +431,7 @@ export const Bank = () => {
   const [uploading, setUploading] = useState(false)
   const [uploadResult, setUploadResult] = useState<{ imported: number; skipped: number; errors: string[] } | null>(null)
   const [uploadError, setUploadError] = useState('')
+  const [openNewest, setOpenNewest] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Párování
@@ -501,7 +517,7 @@ export const Bank = () => {
     try {
       const res = await uploadBankXml(files)
       setUploadResult(res)
-      if (res.imported > 0) setStatementsKey(k => k + 1)
+      if (res.imported > 0) { setOpenNewest(true); setStatementsKey(k => k + 1) }
     } catch (e: any) { setUploadError(e.message) }
     finally { setUploading(false) }
   }
@@ -575,6 +591,8 @@ export const Bank = () => {
         onUnmatch={handleUnmatch}
         onOpenCompany={key => setCompanyPanelKey(key)}
         onCreateInvoice={handleCreateInvoice}
+        openNewest={openNewest}
+        onNewestOpened={() => setOpenNewest(false)}
       />
 
       {matchTarget && (
