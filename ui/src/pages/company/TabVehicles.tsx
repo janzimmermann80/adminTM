@@ -711,7 +711,7 @@ const SimEditForm = ({ form, saving, isNew, tariffs, onChange, onSave, onCancel,
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="col-span-2">
-          <label className={lbl}>Tarif</label>
+          <label className={lbl}>Tarif *</label>
           <select className={cls} value={form.tariff ?? ''} onChange={e => onChange({ tariff: e.target.value || null })}>
             <option value="">—</option>
             {tariffs.map(t => <option key={t.tariff} value={t.tariff}>{t.name}</option>)}
@@ -750,7 +750,7 @@ const SimEditForm = ({ form, saving, isNew, tariffs, onChange, onSave, onCancel,
         ))}
       </div>
       <div className="flex items-center gap-2 pt-1">
-        <button onClick={onSave} disabled={saving || !form.imsi.trim()}
+        <button onClick={onSave} disabled={saving || !form.imsi.trim() || !form.tariff}
           className="px-4 py-1.5 rounded-lg bg-[#0a6b6b] text-white text-sm font-medium hover:bg-[#0d8080] disabled:opacity-50 disabled:cursor-not-allowed">
           {saving ? 'Ukládám…' : isNew ? 'Přidat SIM' : 'Uložit'}
         </button>

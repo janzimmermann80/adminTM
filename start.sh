@@ -2288,12 +2288,23 @@ else:
     print('Patch SKIP: order-base-monthly already present', file=sys.stderr)
 PYEOF
 
-# Patch: vytvoř queries.ts — výstupy / dotazy (reports_schedule + ai_prompt)
+# Patch: vytvoř queries.ts — výstupy / dotazy (reports_schedule + ai_prompt + address_book_no_company + orsr_lookup)
 python3 - <<'PYEOF'
 import sys, os
 f = '/services/admin-data/patched/src/routes/queries.ts'
 content = """import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getUserSql } from '../db/userSql.js'
+import axios from 'axios'
+import iconv from 'iconv-lite'
+import { readFileSync, appendFileSync } from 'fs'
+
+const DISABLED_CINS_FILE = '/services/admin-www/others/disabled_cins.txt'
+const getDisabledCins = (): string[] => {
+  try {
+    return readFileSync(DISABLED_CINS_FILE, 'utf-8')
+      .split('\\n').map(s => s.trim()).filter(Boolean)
+  } catch { return [] }
+}
 
 export async function queriesRoutes(app: FastifyInstance) {
 
@@ -2326,6 +2337,141 @@ export async function queriesRoutes(app: FastifyInstance) {
     }
   })
 
+  // GET /api/queries/address-book-no-company
+  app.get('/address-book-no-company', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+
+    try {
+      const disabledCins = getDisabledCins()
+      const rows = await sql`
+        SELECT D.book_key, D.company_key, D.company, D.street, D.city, D.zip, D.country, D.cin
+        FROM (
+          SELECT Y.*, X.company AS company_our
+          FROM (
+            SELECT
+              max(book_key)     AS book_key,
+              max(company_key)  AS company_key,
+              max(company)      AS company,
+              max(street)       AS street,
+              max(city)         AS city,
+              max(zip)          AS zip,
+              max(country)      AS country,
+              regexp_replace(cin, E'^[\\\\r\\\\n\\\\t ]*|[\\\\r\\\\n\\\\t ]*$', '', 'g') AS cin
+            FROM ta.address_book_base
+            WHERE country IN ('CZ', 'SK')
+              AND cin <> ''
+              AND cin IS NOT NULL
+              AND cin ~ '^[0-9]+$'
+              AND length(cin) < 9
+            GROUP BY cin
+          ) AS Y
+          LEFT JOIN (
+            SELECT company, cin AS cin_our
+            FROM provider.company
+          ) AS X ON trim(Y.cin) = trim(X.cin_our)
+        ) AS D
+        WHERE D.company_our IS NULL
+          ${disabledCins.length > 0 ? sql`AND NOT (D.cin = ANY(${disabledCins}))` : sql``}
+        ORDER BY D.cin
+      `
+      return reply.send(rows)
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/queries/tariffs
+  app.get('/tariffs', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const rows = await sql`SELECT tariff, name FROM provider.tariff ORDER BY name`
+      return reply.send(rows)
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // POST /api/queries/address-book-import
+  app.post('/address-book-import', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb, provider } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { company, street, city, zip, country, cin, region, tariff } = request.body as any
+    try {
+      const [row] = await sql`
+        INSERT INTO provider.company (provider, company, street, city, zip, country, cin, region, tariff, last_modif)
+        VALUES (${provider}, ${company}, ${street}, ${city}, ${zip}, ${country}, ${cin}, ${region}, ${tariff}, NOW())
+        RETURNING company_key
+      `
+      await sql`INSERT INTO provider.company_detail (company_key) VALUES (${row.company_key})`
+      return reply.send({ company_key: row.company_key })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // POST /api/queries/address-book-ban
+  app.post('/address-book-ban', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb, provider } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { company, street, city, zip, country, cin } = request.body as any
+    try {
+      const [row] = await sql`
+        INSERT INTO provider.company (provider, company, street, city, zip, country, cin, region, tariff, last_modif)
+        VALUES (${provider}, ${company}, ${street}, ${city}, ${zip}, ${country}, ${cin}, '00', '11', NOW())
+        RETURNING company_key
+      `
+      await sql`INSERT INTO provider.company_detail (company_key) VALUES (${row.company_key})`
+      try { appendFileSync(DISABLED_CINS_FILE, cin + '\\n') } catch {}
+      return reply.send({ ok: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/queries/orsr-lookup/:cin
+  app.get('/orsr-lookup/:cin', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { cin } = request.params as { cin: string }
+    try {
+      const url = `https://www.orsr.sk/hladaj_ico.asp?ICO=${encodeURIComponent(cin)}&SID=0`
+      const resp = await axios.get(url, { responseType: 'arraybuffer', timeout: 10000 })
+      const html = iconv.decode(Buffer.from(resp.data), 'win1250')
+
+      const allTds = [...html.matchAll(/<td[^>]*>([\\s\\S]*?)<\\/td>/gi)]
+      const strip = (s: string) => s.replace(/<[^>]+>/g, '').replace(/\\s+/g, ' ').trim()
+
+      let name: string | null = null
+      let address: string | null = null
+      let court: string | null = null
+      let section: string | null = null
+
+      for (let i = 0; i < allTds.length; i++) {
+        if (allTds[i][1].includes('vypis.asp')) {
+          name    = strip(allTds[i][1])
+          address = allTds[i + 1] ? strip(allTds[i + 1][1]) : null
+          court   = allTds[i + 3] ? strip(allTds[i + 3][1]) : null
+          section = allTds[i + 4] ? strip(allTds[i + 4][1]) : null
+          break
+        }
+      }
+
+      return reply.send({ name, address, court, section })
+    } catch (e: any) {
+      return reply.status(502).send({ error: e.message ?? 'ORSR nedostupný' })
+    }
+  })
+
   // GET /api/queries/ai-prompt?company_key=&type=&limit=
   app.get('/ai-prompt', {
     onRequest: [(app as any).authenticate],
@@ -2354,6 +2500,104 @@ export async function queriesRoutes(app: FastifyInstance) {
 """
 open(f, 'w').write(content)
 print('Patch OK: queries.ts created/updated', file=sys.stderr)
+PYEOF
+
+# Patch: queries.ts — oprav cin normalizaci (REGEXP_REPLACE místo trim, odstraní \r\n\t)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/queries.ts'
+src = open(f).read()
+changed = False
+old_trim = "            trim(cin)         AS cin"
+new_regexp = "            regexp_replace(cin, E'^[\\\\r\\\\n\\\\t ]*|[\\\\r\\\\n\\\\t ]*$', '', 'g') AS cin"
+if old_trim in src:
+    src = src.replace(old_trim, new_regexp)
+    changed = True
+old_import = "import { readFileSync } from 'fs'"
+new_import = "import { readFileSync, appendFileSync } from 'fs'"
+if old_import in src:
+    src = src.replace(old_import, new_import)
+    changed = True
+old_ban_return = "      return reply.send({ ok: true })\n    } finally {\n      await sql.end()\n    }\n  })\n\n  // GET /api/queries/orsr-lookup/:cin"
+new_ban_return = "      try { appendFileSync(DISABLED_CINS_FILE, cin + '\\n') } catch {}\n      return reply.send({ ok: true })\n    } finally {\n      await sql.end()\n    }\n  })\n\n  // GET /api/queries/orsr-lookup/:cin"
+if 'appendFileSync(DISABLED_CINS_FILE' not in src and old_ban_return in src:
+    src = src.replace(old_ban_return, new_ban_return)
+    changed = True
+if changed:
+    open(f, 'w').write(src)
+    print('Patch OK: queries.ts cin regexp_replace + appendFileSync', file=sys.stderr)
+else:
+    print('Patch SKIP: queries.ts already patched or pattern not found', file=sys.stderr)
+PYEOF
+
+# Patch: queries.ts — přepis dotazu (WHERE D.company_our IS NULL, ORDER BY company NULLS LAST)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/queries.ts'
+src = open(f).read()
+old_q = """        SELECT Y.book_key, Y.company_key, Y.company, Y.street, Y.city, Y.zip, Y.country, Y.cin
+        FROM (
+          SELECT
+            max(book_key)     AS book_key,
+            max(company_key)  AS company_key,
+            max(company)      AS company,
+            max(street)       AS street,
+            max(city)         AS city,
+            max(zip)          AS zip,
+            max(country)      AS country,
+            regexp_replace(cin, E'^[\\\\r\\\\n\\\\t ]*|[\\\\r\\\\n\\\\t ]*$', '', 'g') AS cin
+          FROM ta.address_book_base
+          WHERE country IN ('CZ', 'SK')
+            AND cin <> ''
+            AND cin IS NOT NULL
+            AND cin ~ '^[0-9]+$'
+            AND length(cin) < 9
+          GROUP BY cin
+        ) AS Y
+        LEFT JOIN (
+          SELECT trim(cin) AS cin_our
+          FROM provider.company
+          WHERE cin IS NOT NULL
+        ) AS X ON Y.cin = X.cin_our
+        WHERE X.cin_our IS NULL
+          ${disabledCins.length > 0 ? sql`AND NOT (Y.cin = ANY(${disabledCins}))` : sql``}
+        ORDER BY Y.company"""
+new_q = """        SELECT D.book_key, D.company_key, D.company, D.street, D.city, D.zip, D.country, D.cin
+        FROM (
+          SELECT Y.*, X.company AS company_our
+          FROM (
+            SELECT
+              max(book_key)     AS book_key,
+              max(company_key)  AS company_key,
+              max(company)      AS company,
+              max(street)       AS street,
+              max(city)         AS city,
+              max(zip)          AS zip,
+              max(country)      AS country,
+              regexp_replace(cin, E'^[\\\\r\\\\n\\\\t ]*|[\\\\r\\\\n\\\\t ]*$', '', 'g') AS cin
+            FROM ta.address_book_base
+            WHERE country IN ('CZ', 'SK')
+              AND cin <> ''
+              AND cin IS NOT NULL
+              AND cin ~ '^[0-9]+$'
+              AND length(cin) < 9
+            GROUP BY cin
+          ) AS Y
+          LEFT JOIN (
+            SELECT company, cin AS cin_our
+            FROM provider.company
+          ) AS X ON trim(Y.cin) = trim(X.cin_our)
+        ) AS D
+        WHERE D.company_our IS NULL
+          ${disabledCins.length > 0 ? sql`AND NOT (D.cin = ANY(${disabledCins}))` : sql``}
+        ORDER BY D.cin"""
+if old_q in src:
+    open(f, 'w').write(src.replace(old_q, new_q))
+    print('Patch OK: queries.ts WHERE D.company_our IS NULL + ORDER BY NULLS LAST', file=sys.stderr)
+elif 'D.company_our IS NULL' in src:
+    print('Patch SKIP: queries.ts already has D.company_our IS NULL', file=sys.stderr)
+else:
+    print('Patch SKIP: queries.ts old_q pattern not found', file=sys.stderr)
 PYEOF
 
 # Patch: index.ts — registrace queriesRoutes

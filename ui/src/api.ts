@@ -320,3 +320,39 @@ export const getAiPrompt = (params: { company_key?: string; type?: string; limit
   if (params.limit) p.set('limit', String(params.limit))
   return get<AiPromptRow[]>(`/queries/ai-prompt${p.toString() ? '?' + p : ''}`)
 }
+
+export type AddressBookNoCompanyRow = {
+  book_key: number | null
+  company_key: number | null
+  company: string | null
+  street: string | null
+  city: string | null
+  zip: string | null
+  country: string | null
+  cin: string | null
+}
+
+export const getAddressBookNoCompany = () =>
+  get<AddressBookNoCompanyRow[]>('/queries/address-book-no-company')
+
+export type TariffRow = { tariff: string; name: string }
+export const getTariffs = () => get<TariffRow[]>('/queries/tariffs')
+
+export const importAddressBookEntry = (data: {
+  company: string; street: string; city: string; zip: string
+  country: string; cin: string; region: string; tariff: string
+}) => post<{ company_key: number }>('/queries/address-book-import', data)
+
+export const banAddressBookEntry = (data: {
+  company: string; street: string; city: string; zip: string; country: string; cin: string
+}) => post<void>('/queries/address-book-ban', data)
+
+export type OrsrResult = {
+  name: string | null
+  address: string | null
+  court: string | null
+  section: string | null
+}
+
+export const getOrsrLookup = (cin: string) =>
+  get<OrsrResult>(`/queries/orsr-lookup/${encodeURIComponent(cin)}`)
