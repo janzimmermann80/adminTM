@@ -114,14 +114,12 @@ function InvoiceSearchModal({ tx, onClose, onMatched, onProformaSaved }: {
                           settlement: tx.transaction_date?.slice(0, 10),
                           payment_method: 'T',
                           items: itemName ? (() => {
-                            const total = inv.curr_total != null ? Number(inv.curr_total) : tx.amount
-                            const paidTotal = inv.currency !== 'CZK' && Number(inv.exchange_rate) > 1
-                              ? total / Number(inv.exchange_rate)
-                              : total
-                            // price_unit = cena za 1 měsíc (celková / měsíce, bez DPH)
+                            // /create endpoint: price_unit v měně faktury (EUR nebo CZK bez DPH)
+                            // curr_total = priceSum * rate → posíláme EUR přímo
+                            const fcy = Number(inv.curr_total ?? tx.amount)
                             const priceUnit = inv.currency === 'CZK'
-                              ? Math.round(paidTotal / months / 1.21 * 100) / 100
-                              : Math.round(paidTotal / months * 100) / 100
+                              ? Math.round(fcy / months / 1.21 * 100) / 100
+                              : Math.round(fcy / months * 100) / 100
                             return [{ name: itemName, price_unit: priceUnit, vat_rate: inv.currency === 'CZK' ? 21 : 0, quantity: months, discount: 0 }]
                           })() : undefined,
                         }})

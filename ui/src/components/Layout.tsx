@@ -107,7 +107,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/search',            label: 'Hledání',         icon: <IconSearch /> },
   { label: 'Fakturace',       icon: <IconInvoice />,    disabled: true },
   { label: 'Nabídky',         icon: <IconOffer />,      disabled: true },
-  { label: 'Deník',           icon: <IconDiary />,      disabled: true },
+  { to: '/diary',              label: 'Deník',           icon: <IconDiary /> },
   { to: '/statistics',        label: 'Statistiky',      icon: <IconStats /> },
   { label: 'TruckManager',    icon: <IconTruck />,      disabled: true },
   { label: 'Odeslat e-mail',  icon: <IconEmail />,      disabled: true },

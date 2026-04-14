@@ -7,6 +7,7 @@ import { Search } from './pages/Search'
 import { CompanyDetail } from './pages/company/CompanyDetail'
 import { WorkerDetail } from './pages/WorkerDetail'
 import { InvoicePrint } from './pages/InvoicePrint'
+import { Diary } from './pages/Diary'
 import { Bank } from './pages/Bank'
 import { Statistics } from './pages/Statistics'
 import { Queries } from './pages/Queries'
@@ -30,6 +31,7 @@ const AppRoutes = () => (
     <Route path="/company/:id" element={<ProtectedRoute><CompanyDetail /></ProtectedRoute>} />
     <Route path="/worker/:initials" element={<ProtectedRoute><WorkerDetail /></ProtectedRoute>} />
     <Route path="/invoicing/:id/print" element={<InvoicePrint />} />
+    <Route path="/diary" element={<ProtectedRoute><Diary /></ProtectedRoute>} />
     <Route path="/bank" element={<ProtectedRoute><Bank /></ProtectedRoute>} />
     <Route path="/statistics" element={<ProtectedRoute><Statistics /></ProtectedRoute>} />
     <Route path="/queries" element={<ProtectedRoute><Queries /></ProtectedRoute>} />

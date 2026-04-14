@@ -35,6 +35,8 @@ const post = <T>(url: string, body: unknown) =>
   request<T>(url, { method: 'POST', body: JSON.stringify(body) })
 const put = <T>(url: string, body: unknown) =>
   request<T>(url, { method: 'PUT', body: JSON.stringify(body) })
+const patch = <T>(url: string, body: unknown) =>
+  request<T>(url, { method: 'PATCH', body: JSON.stringify(body) })
 const del = <T>(url: string) => request<T>(url, { method: 'DELETE' })
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -82,6 +84,15 @@ export const getStatsOrderBaseMonthly   = () => get<any[]>('/statistics/order-ba
 export const getStatsInvoiceBaseMonthly = () => get<any[]>('/statistics/invoice-base-monthly')
 export const getDiaryUpcoming = (initials: string) =>
   get<any>(`/diary?owner=${encodeURIComponent(initials)}&days=14`)
+export const getDiaryWindow = (owner: string, date: string, days: number) =>
+  get<any>(`/diary?owner=${encodeURIComponent(owner)}&date=${date}&days=${days}`)
+export const getDiaryEmployees = () => get<string[]>('/diary/employees')
+export const completeDiaryEntry = (id: number, completed: boolean) =>
+  patch<{ success: boolean }>(`/diary/${id}/complete`, { completed })
+export const createDiaryEntry = (body: { owner: string; company_key: number; time: string; text: string }) =>
+  post<{ diary_key: number }>('/diary', body)
+export const updateDiaryEntry = (id: number, text: string, time?: string) =>
+  put<{ success: boolean }>(`/diary/${id}`, { text, ...(time ? { time } : {}) })
 
 // ── Companies ─────────────────────────────────────────────────────────────────
 

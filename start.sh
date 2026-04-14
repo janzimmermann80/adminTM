@@ -1367,7 +1367,8 @@ function parseEntry(ntry: any, defaultCurrency: string): ParsedTransaction {
   const refs = tx['Refs'] ?? {}
   const addtlInfo: string = (tx['AddtlTxInf'] ?? ntry['AddtlNtryInf'] ?? '').toString()
   const rmtInf = tx['RmtInf'] ?? {}
-  const rmtUstrd: string = (Array.isArray(rmtInf['Ustrd']) ? rmtInf['Ustrd'][0] : rmtInf['Ustrd']) ?? ''
+  const rmtUstrdRaw = Array.isArray(rmtInf['Ustrd']) ? rmtInf['Ustrd'][0] : rmtInf['Ustrd']
+  const rmtUstrd: string = rmtUstrdRaw != null ? String(rmtUstrdRaw) : ''
 
   // Strd je nyní pole — každý symbol (VS, KS, SS) je ve vlastním elementu s prefixem
   const strdList: any[] = Array.isArray(rmtInf['Strd']) ? rmtInf['Strd'] : (rmtInf['Strd'] ? [rmtInf['Strd']] : [])
@@ -1502,7 +1503,7 @@ if 'seq_number' in src:
 else:
     src = src.replace(
         'const stmtInsertStatement = db.prepare(`\n  INSERT OR IGNORE INTO bank_statements\n    (filename, account_iban, account_number, period_from, period_to,\n     opening_balance, closing_balance, currency)\n  VALUES (@filename, @account_iban, @account_number, @period_from, @period_to,\n          @opening_balance, @closing_balance, @currency)\n`)',
-        "try { db.exec(`ALTER TABLE bank_statements ADD COLUMN seq_number INTEGER`) } catch {}\nconst stmtInsertStatement = db.prepare(`\n  INSERT OR IGNORE INTO bank_statements\n    (filename, account_iban, account_number, period_from, period_to,\n     opening_balance, closing_balance, currency, seq_number)\n  VALUES (@filename, @account_iban, @account_number, @period_from, @period_to,\n          @opening_balance, @closing_balance, @currency, @seq_number)\n`)"
+        "try { db.exec(`ALTER TABLE bank_statements ADD COLUMN seq_number INTEGER`) } catch {}\ntry { db.exec(`ALTER TABLE bank_transactions ADD COLUMN matched_company_key INTEGER`) } catch {}\nconst stmtInsertStatement = db.prepare(`\n  INSERT OR IGNORE INTO bank_statements\n    (filename, account_iban, account_number, period_from, period_to,\n     opening_balance, closing_balance, currency, seq_number)\n  VALUES (@filename, @account_iban, @account_number, @period_from, @period_to,\n          @opening_balance, @closing_balance, @currency, @seq_number)\n`)"
     )
     open(f, 'w').write(src)
     print('Patch OK: bank.ts seq_number', file=sys.stderr)
@@ -2953,6 +2954,30 @@ elif marker in src:
     print('Patch OK: companies/index.ts — count-unpaid endpoint added', file=sys.stderr)
 else:
     print('Patch WARN: count-unpaid marker not found', file=sys.stderr)
+PYEOF
+
+# Patch: statistics.ts — expired_access_vehicle_count (počet aktivních vozidel firem s prošlým přístupem)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/statistics.ts'
+src = open(f).read()
+if 'expired_access_vehicle_count' in src:
+    print('Patch SKIP: statistics.ts — expired_access_vehicle_count already present', file=sys.stderr)
+else:
+    src = src.replace(
+        "      const [companies, activeCompanies, contracts, invoices, claims, claimsByRegion, diary, vehicles, expiredGpsImport] = await Promise.all([",
+        "      const [companies, activeCompanies, contracts, invoices, claims, claimsByRegion, diary, vehicles, expiredGpsImport, expiredVehicles] = await Promise.all(["
+    )
+    src = src.replace(
+        "        // Firmy s GPS importem a prošlým přístupem\n        sql`\n          SELECT count(*)::int AS count\n          FROM gps.import_service I\n          LEFT JOIN provider.company_detail D ON I.company_key = D.company_key\n          WHERE D.admittance_date::date < NOW()\n        `.catch(() => [{ count: 0 }]),\n      ])",
+        "        // Firmy s GPS importem a prošlým přístupem\n        sql`\n          SELECT count(*)::int AS count\n          FROM gps.import_service I\n          LEFT JOIN provider.company_detail D ON I.company_key = D.company_key\n          WHERE D.admittance_date::date < NOW()\n        `.catch(() => [{ count: 0 }]),\n        // Aktivní vozidla firem s prošlým přístupem\n        sql`\n          SELECT count(*)::int AS count\n          FROM gps.car_base CB\n          JOIN (\n            SELECT DISTINCT I.company_key\n            FROM gps.import_service I\n            LEFT JOIN provider.company_detail D ON I.company_key = D.company_key\n            WHERE D.admittance_date::date < NOW()\n          ) expired ON expired.company_key = CB.company_key\n          WHERE CB.inactive IS NOT TRUE\n        `.catch(() => [{ count: 0 }]),\n      ])"
+    )
+    src = src.replace(
+        "        expired_access_with_tracking: expiredGpsImport[0]?.count ?? 0,",
+        "        expired_access_with_tracking: expiredGpsImport[0]?.count ?? 0,\n        expired_access_vehicle_count: expiredVehicles[0]?.count ?? 0,"
+    )
+    open(f, 'w').write(src)
+    print('Patch OK: statistics.ts — expired_access_vehicle_count', file=sys.stderr)
 PYEOF
 
 # Aktualizuj proxy.php na port 3002

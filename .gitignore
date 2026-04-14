@@ -28,3 +28,11 @@ certs/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime dirs
+patched/
+patched.old/
+chrome-libs/
+local-pkg/
+dist/
+debug_invoice.png
