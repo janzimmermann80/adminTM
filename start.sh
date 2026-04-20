@@ -3224,6 +3224,239 @@ else:
     print('Patch OK: statistics.ts — expired_access_vehicle_count', file=sys.stderr)
 PYEOF
 
+# Patch: queries.ts — api-requests-by-company (využití external API za posledních N dní)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/queries.ts'
+src = open(f).read()
+marker = '\n}\n'  # konec souboru (poslední closing brace)
+insert = """
+  // GET /api/queries/api-requests-by-company?days=30
+  app.get('/api-requests-by-company', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { days } = request.query as { days?: string }
+    const d = Math.min(Math.max(Number(days ?? 30), 1), 365)
+
+    // Kurz USD/CZK z ČNB
+    let usdRate = 23
+    try {
+      const cnb = await fetch('https://www.cnb.cz/cs/financni_trhy/devizovy_trh/kurzy_devizoveho_trhu/denni_kurz.txt')
+      const txt = await cnb.text()
+      for (const line of txt.split('\\n').slice(2)) {
+        const parts = line.split('|')
+        if (parts[3]?.trim().toUpperCase() === 'USD') {
+          usdRate = parseFloat(parts[4].trim().replace(',', '.')) / (parseInt(parts[2], 10) || 1)
+          break
+        }
+      }
+    } catch {}
+
+    try {
+      const rows = await sql`
+        SELECT
+          R.company_key,
+          C.company,
+          count(*) FILTER (WHERE R.type = 'autocomplete')          ::int AS autocomplete,
+          coalesce(sum(price) FILTER (WHERE R.type = 'autocomplete'), 0)::numeric         AS autocomplete_usd,
+          count(*) FILTER (WHERE R.type = 'autocomplete-latest')   ::int AS autocomplete_latest,
+          coalesce(sum(price) FILTER (WHERE R.type = 'autocomplete-latest'), 0)::numeric  AS autocomplete_latest_usd,
+          count(*) FILTER (WHERE R.type = 'directions')            ::int AS directions,
+          coalesce(sum(price) FILTER (WHERE R.type = 'directions'), 0)::numeric           AS directions_usd,
+          count(*) FILTER (WHERE R.type = 'geocoding')             ::int AS geocoding,
+          coalesce(sum(price) FILTER (WHERE R.type = 'geocoding'), 0)::numeric            AS geocoding_usd,
+          count(*) FILTER (WHERE R.type = 'here-route-cost')       ::int AS here_route_cost,
+          coalesce(sum(price) FILTER (WHERE R.type = 'here-route-cost'), 0)::numeric      AS here_route_cost_usd,
+          count(*) FILTER (WHERE R.type = 'maps-javascript')       ::int AS maps_javascript,
+          coalesce(sum(price) FILTER (WHERE R.type = 'maps-javascript'), 0)::numeric      AS maps_javascript_usd,
+          count(*) FILTER (WHERE R.type = 'openai-pdf')            ::int AS openai_pdf,
+          coalesce(sum(price) FILTER (WHERE R.type = 'openai-pdf'), 0)::numeric           AS openai_pdf_usd,
+          count(*) FILTER (WHERE R.type = 'place-details')         ::int AS place_details,
+          coalesce(sum(price) FILTER (WHERE R.type = 'place-details'), 0)::numeric        AS place_details_usd,
+          count(*) FILTER (WHERE R.type = 'tollguru-route-cost')   ::int AS tollguru_route_cost,
+          coalesce(sum(price) FILTER (WHERE R.type = 'tollguru-route-cost'), 0)::numeric  AS tollguru_route_cost_usd,
+          count(*)                                                  ::int AS occurrence_count,
+          coalesce(sum(price), 0)::numeric                                AS total_usd
+        FROM provider.external_api_requests R
+        INNER JOIN provider.company C ON R.company_key = C.company_key
+        WHERE R.created_time >= NOW() - (${d} * INTERVAL '1 day')
+        GROUP BY R.company_key, C.company
+        ORDER BY occurrence_count DESC
+      `
+      const rate = usdRate
+      const result = rows.map((r: any) => ({
+        ...r,
+        autocomplete_czk:        Math.round(Number(r.autocomplete_usd)        * rate * 100) / 100,
+        autocomplete_latest_czk: Math.round(Number(r.autocomplete_latest_usd) * rate * 100) / 100,
+        directions_czk:          Math.round(Number(r.directions_usd)          * rate * 100) / 100,
+        geocoding_czk:           Math.round(Number(r.geocoding_usd)           * rate * 100) / 100,
+        here_route_cost_czk:     Math.round(Number(r.here_route_cost_usd)     * rate * 100) / 100,
+        maps_javascript_czk:     Math.round(Number(r.maps_javascript_usd)     * rate * 100) / 100,
+        openai_pdf_czk:          Math.round(Number(r.openai_pdf_usd)          * rate * 100) / 100,
+        place_details_czk:       Math.round(Number(r.place_details_usd)       * rate * 100) / 100,
+        tollguru_route_cost_czk: Math.round(Number(r.tollguru_route_cost_usd) * rate * 100) / 100,
+        total_czk:               Math.round(Number(r.total_usd)               * rate * 100) / 100,
+        usd_rate: Math.round(rate * 1000) / 1000,
+      }))
+      return reply.send(result)
+    } finally {
+      await sql.end()
+    }
+  })
+
+"""
+if '/api-requests-by-company' not in src:
+    # Vlož před poslední `}`
+    idx = src.rfind('\n}\n')
+    if idx == -1:
+        idx = src.rfind('\n}')
+    open(f, 'w').write(src[:idx] + insert + src[idx:])
+    print('Patch OK: queries.ts — api-requests-by-company', file=sys.stderr)
+else:
+    print('Patch SKIP: api-requests-by-company already present', file=sys.stderr)
+PYEOF
+
+# Patch: search.ts — přidej vehicle filtry (car_key, spz, imsi, tm_tel) do SearchQuery a WHERE
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/search.ts'
+src = open(f).read()
+
+old_iface = "  // note filters\n  note_from?: string\n  note_to?: string\n  note_type?: string\n  note_creator?: string\n\n  // pagination"
+new_iface = "  // note filters\n  note_from?: string\n  note_to?: string\n  note_type?: string\n  note_creator?: string\n\n  // vehicle filters\n  car_key?: string\n  spz?: string\n  imsi?: string\n  tm_tel?: string\n\n  // pagination"
+
+old_where = "    const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : ''"
+new_where = """    // --- vehicle filters ---
+    if (q.car_key) {
+      whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.car_base WHERE car_key = ${addParam(Number(q.car_key))})`)
+    }
+    if (q.spz) {
+      whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.car_base WHERE spz ILIKE ${addParam('%' + q.spz + '%')})`)
+    }
+    if (q.imsi) {
+      whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.car_base WHERE sim_imsi ILIKE ${addParam('%' + q.imsi + '%')})`)
+    }
+    if (q.tm_tel) {
+      whereClauses.push(`C.company_key IN (SELECT DISTINCT CB.company_key FROM gps.support_info SI JOIN gps.car_base CB ON SI.car_key = CB.car_key WHERE SI.phone ILIKE ${addParam('%' + q.tm_tel + '%')})`)
+    }
+
+    const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : ''"""
+
+changed = False
+if 'vehicle filters' not in src:
+    if old_iface in src:
+        src = src.replace(old_iface, new_iface); changed = True
+    if old_where in src:
+        src = src.replace(old_where, new_where); changed = True
+    if changed:
+        open(f, 'w').write(src)
+        print('Patch OK: search.ts vehicle filters', file=sys.stderr)
+    else:
+        print('Patch SKIP: search.ts vehicle filters — anchors not found', file=sys.stderr)
+else:
+    print('Patch SKIP: search.ts vehicle filters already present', file=sys.stderr)
+PYEOF
+
+# Patch: search.ts — přidej /b endpoint pro hledání dle identifikátoru (company_key, TM tel., car_key, SPZ, IMSI, číslo účtu)
+python3 - <<'PYEOF'
+import sys
+f = '/services/admin-data/patched/src/routes/search.ts'
+src = open(f).read()
+insert = """
+  // GET /api/search/b?q=VALUE — hledání dle identifikátoru
+  app.get('/b', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { q } = request.query as { q?: string }
+    if (!q?.trim()) return reply.send([])
+    const qTrim = q.trim()
+    const isNumeric = /^\\d+$/.test(qTrim)
+    const pct = '%' + qTrim + '%'
+
+    try {
+      const results: any[] = []
+      const add = (match_type: string, r: any) => results.push({ match_type, ...r })
+
+      await Promise.all([
+        // company_key (pouze číslo)
+        isNumeric ? sql`
+          SELECT company_key::int, id, company, account, bank
+          FROM provider.company WHERE company_key = ${Number(qTrim)}
+        `.then((rows: any[]) => rows.forEach(r => add('company_key', { ...r, car_key: null, spz: null, sim_imsi: null, phone: null }))) : Promise.resolve(),
+
+        // car_key (pouze číslo)
+        isNumeric ? sql`
+          SELECT CB.car_key::int, CB.spz, CB.sim_imsi,
+                 CB.company_key::int, C.company, C.id, C.account, C.bank
+          FROM gps.car_base CB
+          JOIN provider.company C ON CB.company_key = C.company_key
+          WHERE CB.car_key = ${Number(qTrim)}
+        `.then((rows: any[]) => rows.forEach(r => add('car_key', { ...r, phone: null }))) : Promise.resolve(),
+
+        // SPZ
+        sql`
+          SELECT CB.car_key::int, CB.spz, CB.sim_imsi,
+                 CB.company_key::int, C.company, C.id, C.account, C.bank
+          FROM gps.car_base CB
+          JOIN provider.company C ON CB.company_key = C.company_key
+          WHERE CB.spz ILIKE ${pct}
+          LIMIT 20
+        `.then((rows: any[]) => rows.forEach(r => add('spz', { ...r, phone: null }))),
+
+        // IMSI
+        sql`
+          SELECT CB.car_key::int, CB.spz, CB.sim_imsi,
+                 CB.company_key::int, C.company, C.id, C.account, C.bank
+          FROM gps.car_base CB
+          JOIN provider.company C ON CB.company_key = C.company_key
+          WHERE CB.sim_imsi ILIKE ${pct}
+          LIMIT 20
+        `.then((rows: any[]) => rows.forEach(r => add('imsi', { ...r, phone: null }))),
+
+        // TM tel. (nejnovější záznam na auto)
+        sql`
+          SELECT DISTINCT ON (SI.car_key)
+            SI.car_key::int, SI.phone,
+            CB.spz, CB.sim_imsi,
+            CB.company_key::int, C.company, C.id, C.account, C.bank
+          FROM gps.support_info SI
+          JOIN gps.car_base CB ON SI.car_key = CB.car_key
+          JOIN provider.company C ON CB.company_key = C.company_key
+          WHERE SI.phone ILIKE ${pct}
+          ORDER BY SI.car_key, SI.created DESC
+          LIMIT 20
+        `.then((rows: any[]) => rows.forEach(r => add('tm_tel', r))),
+
+        // Číslo účtu
+        sql`
+          SELECT company_key::int, id, company, account, bank
+          FROM provider.company
+          WHERE account ILIKE ${pct} AND account IS NOT NULL AND account != ''
+          LIMIT 20
+        `.then((rows: any[]) => rows.forEach(r => add('account', { ...r, car_key: null, spz: null, sim_imsi: null, phone: null }))),
+      ])
+
+      return reply.send(results)
+    } finally {
+      await sql.end()
+    }
+  })
+
+"""
+if "'/b'" not in src and '"/b"' not in src:
+    idx = src.rfind('\n}\n')
+    if idx == -1:
+        idx = src.rfind('\n}')
+    open(f, 'w').write(src[:idx] + insert + src[idx:])
+    print('Patch OK: search.ts — /b endpoint', file=sys.stderr)
+else:
+    print('Patch SKIP: search /b already present', file=sys.stderr)
+PYEOF
+
 # Aktualizuj proxy.php na port 3002
 sed -i 's|http://localhost:[0-9]*/api|http://localhost:3002/api|g' /services/admin-www/proxy.php 2>/dev/null || true
 

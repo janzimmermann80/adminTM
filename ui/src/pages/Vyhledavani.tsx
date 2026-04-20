@@ -91,9 +91,167 @@ const RadioPair = ({
   </tr>
 )
 
+// ── Vyhledávání B ─────────────────────────────────────────────────────────────
+
+interface VehicleForm {
+  car_key: string
+  spz: string
+  imsi: string
+  tm_tel: string
+}
+
+const emptyVehicle = (): VehicleForm => ({ car_key: '', spz: '', imsi: '', tm_tel: '' })
+
+const SearchB = () => {
+  const [form, setForm] = useState<VehicleForm>(emptyVehicle())
+  const [rows, setRows] = useState<any[]>([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [searched, setSearched] = useState(false)
+  const [modalKey, setModalKey] = useState<string | null>(null)
+
+  const s = (k: keyof VehicleForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(prev => ({ ...prev, [k]: e.target.value }))
+
+  const run = async (off = 0) => {
+    setLoading(true); setError(''); setSearched(true)
+    try {
+      const res = await search({
+        car_key: form.car_key  || undefined,
+        spz:     form.spz      || undefined,
+        imsi:    form.imsi     || undefined,
+        tm_tel:  form.tm_tel   || undefined,
+        limit:   LIMIT,
+        offset:  off,
+      })
+      setRows(res.data)
+      setTotal(res.total)
+      setOffset(off)
+    } catch (e: any) {
+      setError(e.message ?? 'Chyba')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handlePage = (newOffset: number) => { run(newOffset); window.scrollTo(0, 0) }
+
+  return (
+    <>
+      {modalKey && <CompanyDetailModal companyKey={modalKey} onClose={() => setModalKey(null)} />}
+
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-5">
+        <div className="p-5" onKeyDown={e => { if (e.key === 'Enter') run(0) }}>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Hledat dle vozidla</p>
+          <table className="w-full">
+            <tbody>
+              <tr>
+                <td className="pr-1 text-right text-xs text-gray-500 whitespace-nowrap py-1">car_key:</td>
+                <td className="py-1"><input className={inp} value={form.car_key} onChange={s('car_key')} type="number" placeholder="číslo" /></td>
+                <td className="py-1 pl-2"><input className={inp} value={form.spz} onChange={s('spz')} placeholder="SPZ" /></td>
+                <td className="pl-1 text-xs text-gray-500 whitespace-nowrap py-1">:SPZ</td>
+              </tr>
+              <tr>
+                <td className="pr-1 text-right text-xs text-gray-500 whitespace-nowrap py-1">IMSI:</td>
+                <td className="py-1"><input className={inp} value={form.imsi} onChange={s('imsi')} placeholder="SIM IMSI" /></td>
+                <td className="py-1 pl-2"><input className={inp} value={form.tm_tel} onChange={s('tm_tel')} placeholder="TM telefon" /></td>
+                <td className="pl-1 text-xs text-gray-500 whitespace-nowrap py-1">:TM tel.</td>
+              </tr>
+            </tbody>
+          </table>
+          <div className="flex gap-2 mt-4">
+            <button onClick={() => run(0)} disabled={loading}
+              className="px-4 py-1.5 bg-[#0a6b6b] hover:bg-[#085858] text-white text-sm rounded-lg disabled:opacity-50">
+              {loading ? 'Hledám…' : 'Hledat'}
+            </button>
+            <button onClick={() => setForm(emptyVehicle())}
+              className="px-4 py-1.5 border border-gray-300 hover:bg-gray-50 text-gray-600 text-sm rounded-lg">
+              Smaž vše
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 mb-4 text-sm">{error}</div>
+      )}
+
+      {(searched || loading) && (
+        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
+            <span className="text-sm text-gray-600">
+              {loading ? 'Hledám…' : total > 0
+                ? <><strong>{total}</strong> záznamů</>
+                : 'Žádné výsledky'}
+            </span>
+            {loading && <Spinner size={4} />}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">ID</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Firma</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Ulice</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden xl:table-cell whitespace-nowrap">PSČ</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Město</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden md:table-cell">Stát</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden xl:table-cell">Oblast</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden lg:table-cell">Tarif</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide hidden xl:table-cell">Změna</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {rows.map(c => (
+                  <tr key={c.company_key}
+                    onClick={() => setModalKey(c.company_key)}
+                    className="hover:bg-teal-50 cursor-pointer transition-colors">
+                    <td className="px-3 py-2 font-mono text-xs text-gray-500">{c.id}</td>
+                    <td className="px-3 py-2 font-medium text-gray-900">
+                      <a href={`#/company/${c.company_key}`} target="_blank" rel="noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="hover:text-[#0a6b6b] hover:underline">{c.company}</a>
+                    </td>
+                    <td className="px-3 py-2 text-gray-500 hidden lg:table-cell">{c.street}</td>
+                    <td className="px-3 py-2 text-gray-500 hidden xl:table-cell font-mono text-xs">{c.zip}</td>
+                    <td className="px-3 py-2 text-gray-600">{c.city}</td>
+                    <td className="px-3 py-2 hidden md:table-cell">
+                      {c.country && <span className="bg-gray-100 text-gray-600 rounded px-1.5 py-0.5 text-xs font-mono">{c.country}</span>}
+                    </td>
+                    <td className="px-3 py-2 text-gray-500 hidden xl:table-cell text-xs">{c.region?.trim()}</td>
+                    <td className="px-3 py-2 hidden lg:table-cell">
+                      {c.tariff_name
+                        ? <span className="bg-teal-100 text-[#0a6b6b] rounded px-1.5 py-0.5 text-xs">{c.tariff_name}</span>
+                        : c.tariff ? <span className="text-gray-400 text-xs">{c.tariff}</span> : null}
+                    </td>
+                    <td className="px-3 py-2 text-gray-400 hidden xl:table-cell text-xs">{formatDate(c.last_modif)}</td>
+                  </tr>
+                ))}
+                {rows.length === 0 && !loading && (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-12 text-center text-gray-400">Žádné výsledky</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          {total > LIMIT && (
+            <div className="px-5 pb-4">
+              <Pagination total={total} limit={LIMIT} offset={offset} onChange={handlePage} />
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
 export const Vyhledavani = () => {
+  const [tab, setTab] = useState<'a' | 'b'>('a')
   const [meta, setMeta] = useState<SearchMeta>({ tariffs: [], branches: [] })
   const [modalKey, setModalKey] = useState<string | null>(null)
   const [text, setText] = useState<TextForm>(emptyText())
@@ -188,11 +346,25 @@ export const Vyhledavani = () => {
 
   return (
     <Layout>
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-semibold text-gray-800">Vyhledávání</h1>
+        <div className="flex gap-0 border border-gray-300 rounded-lg overflow-hidden text-sm">
+          <button
+            onClick={() => setTab('a')}
+            className={`px-4 py-1.5 transition-colors ${tab === 'a' ? 'bg-[#0a6b6b] text-white font-medium' : 'text-gray-600 hover:bg-gray-50'}`}>
+            Hledání A
+          </button>
+          <button
+            onClick={() => setTab('b')}
+            className={`px-4 py-1.5 border-l border-gray-300 transition-colors ${tab === 'b' ? 'bg-[#0a6b6b] text-white font-medium' : 'text-gray-600 hover:bg-gray-50'}`}>
+            Hledání B
+          </button>
+        </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-5">
+      {tab === 'b' && <SearchB />}
+
+      {tab === 'a' && <><div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-5">
         <div className="grid grid-cols-1 xl:grid-cols-2 divide-y xl:divide-y-0 xl:divide-x divide-gray-100">
 
           {/* ── Left: text search ───────────────────────────────── */}
@@ -452,6 +624,7 @@ export const Vyhledavani = () => {
           onClose={() => setModalKey(null)}
         />
       )}
+      </>}
     </Layout>
   )
 }

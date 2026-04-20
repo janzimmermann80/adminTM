@@ -118,6 +118,24 @@ export const upsertUserAccount = (id: string, body: Record<string, any>) => put<
 // invoices
 export const getInvoices = (id: string, offset = 0, limit = 10) =>
   get<{ total: number; data: any[] }>(`/companies/${id}/invoices?limit=${limit}&offset=${offset}`)
+
+export const getInvoicingList = (params: {
+  year?: number; company_key?: string; number?: string; date_from?: string; date_to?: string
+  series?: string; settled?: string; proforma?: 'true' | 'false'; limit?: number; offset?: number
+} = {}) => {
+  const p = new URLSearchParams()
+  if (params.year)        p.set('year', String(params.year))
+  if (params.company_key) p.set('company_key', params.company_key)
+  if (params.number)      p.set('number', params.number)
+  if (params.date_from)   p.set('date_from', params.date_from)
+  if (params.date_to)     p.set('date_to', params.date_to)
+  if (params.series)      p.set('series', params.series)
+  if (params.settled)     p.set('settled', params.settled)
+  if (params.proforma)    p.set('proforma', params.proforma)
+  if (params.limit)       p.set('limit', String(params.limit))
+  if (params.offset)      p.set('offset', String(params.offset))
+  return get<{ total: number; limit: number; offset: number; data: any[] }>(`/invoicing?${p}`)
+}
 export const getUnpaidInvoicesCount = (companyKey: string) =>
   get<{ count: number }>(`/companies/${companyKey}/invoices/count-unpaid`)
 export const getInvoiceDetail = (id: string) => get<any>(`/invoicing/${id}`)
@@ -356,3 +374,48 @@ export type OrsrResult = {
 
 export const getOrsrLookup = (cin: string) =>
   get<OrsrResult>(`/queries/orsr-lookup/${encodeURIComponent(cin)}`)
+
+export type ApiRequestsByCompanyRow = {
+  company_key: number
+  company: string
+  autocomplete: number
+  autocomplete_czk: number
+  autocomplete_latest: number
+  autocomplete_latest_czk: number
+  directions: number
+  directions_czk: number
+  geocoding: number
+  geocoding_czk: number
+  here_route_cost: number
+  here_route_cost_czk: number
+  maps_javascript: number
+  maps_javascript_czk: number
+  openai_pdf: number
+  openai_pdf_czk: number
+  place_details: number
+  place_details_czk: number
+  tollguru_route_cost: number
+  tollguru_route_cost_czk: number
+  occurrence_count: number
+  total_czk: number
+  usd_rate: number
+}
+
+export const getApiRequestsByCompany = (days?: number) =>
+  get<ApiRequestsByCompanyRow[]>(`/queries/api-requests-by-company${days ? `?days=${days}` : ''}`)
+
+export type SearchBResult = {
+  match_type: 'company_key' | 'car_key' | 'spz' | 'imsi' | 'tm_tel' | 'account'
+  company_key: number | null
+  id: string | null
+  company: string | null
+  car_key: number | null
+  spz: string | null
+  sim_imsi: string | null
+  phone: string | null
+  account: string | null
+  bank: string | null
+}
+
+export const searchB = (q: string) =>
+  get<SearchBResult[]>(`/search/b?q=${encodeURIComponent(q)}`)

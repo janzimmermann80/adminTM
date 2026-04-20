@@ -153,6 +153,7 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
 
   const [emailTarget, setEmailTarget] = useState<Invoice | null>(null)
   const [editTarget,  setEditTarget]  = useState<Invoice | null>(null)
+  const [newInvoiceOpen, setNewInvoiceOpen] = useState(false)
 
   const load = async (off = 0) => {
     setLoading(true)
@@ -160,7 +161,8 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
       const res = await getInvoices(companyKey, off, LIMIT)
       setInvoices(res.data)
       setTotal(res.total)
-    } catch (e: any) { setError(e.message) }
+      return res.data as Invoice[]
+    } catch (e: any) { setError(e.message); return [] as Invoice[] }
     finally { setLoading(false) }
   }
 
@@ -208,7 +210,16 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
 
       <div className="flex items-center justify-between mb-4">
         <span className="text-sm text-gray-500">Celkem faktur: <strong>{total}</strong></span>
-        {loading && <Spinner size={4}/>}
+        <div className="flex items-center gap-2">
+          {loading && <Spinner size={4}/>}
+          <button onClick={() => setNewInvoiceOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/>
+            </svg>
+            Nová faktura
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-200">
@@ -363,6 +374,20 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
           invoiceKey={editTarget.invoice_key}
           onClose={() => setEditTarget(null)}
           onSaved={() => { setEditTarget(null); load(offset) }}
+        />
+      )}
+      {newInvoiceOpen && (
+        <InvoiceFormModal
+          companyKey={Number(companyKey)}
+          onClose={() => setNewInvoiceOpen(false)}
+          onSaved={async (newKey) => {
+            setNewInvoiceOpen(false)
+            const data = await load(0)
+            if (newKey) {
+              const found = data.find(inv => inv.invoice_key === newKey)
+              if (found) setEmailTarget(found)
+            }
+          }}
         />
       )}
     </div>

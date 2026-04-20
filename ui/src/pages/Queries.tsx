@@ -1,6 +1,6 @@
 import React from 'react'
 import { Layout } from '../components/Layout'
-import { getReportsSchedule, ReportsScheduleRow, getAiPrompt, AiPromptRow, getAddressBookNoCompany, AddressBookNoCompanyRow, getOrsrLookup, OrsrResult, getTariffs, TariffRow, importAddressBookEntry, banAddressBookEntry } from '../api'
+import { getReportsSchedule, ReportsScheduleRow, getAiPrompt, AiPromptRow, getAddressBookNoCompany, AddressBookNoCompanyRow, getOrsrLookup, OrsrResult, getTariffs, TariffRow, importAddressBookEntry, banAddressBookEntry, getApiRequestsByCompany, ApiRequestsByCompanyRow } from '../api'
 import { CompanyDetailModal } from '../components/CompanyDetailModal'
 import { Spinner } from '../components/Spinner'
 
@@ -27,6 +27,11 @@ const QUERIES: QueryDef[] = [
     id: 'address-book-no-company',
     label: 'TA adresář',
     description: 'Záznamy v ta.address_book_base (CZ/SK) s platným IČO bez shody v provider.company',
+  },
+  {
+    id: 'api-requests-by-company',
+    label: 'API požadavky',
+    description: 'Počet volání external_api_requests za firmu za zvolené období',
   },
 ]
 
@@ -596,6 +601,95 @@ const AddressBookNoCompanyTable = ({ rows, loading, error, onRowDone }: ABNCProp
   )
 }
 
+// ── API Requests By Company tabulka ─────────────────────────────────────────
+
+type ARBCProps = {
+  rows: ApiRequestsByCompanyRow[]
+  loading: boolean
+  error: string | null
+}
+
+const ARBC_COLS: { key: keyof ApiRequestsByCompanyRow; czk: keyof ApiRequestsByCompanyRow; label: string }[] = [
+  { key: 'autocomplete',        czk: 'autocomplete_czk',        label: 'autocomplete' },
+  { key: 'autocomplete_latest', czk: 'autocomplete_latest_czk', label: 'autocomplete-latest' },
+  { key: 'directions',          czk: 'directions_czk',          label: 'directions' },
+  { key: 'place_details',       czk: 'place_details_czk',       label: 'place-details' },
+  { key: 'maps_javascript',     czk: 'maps_javascript_czk',     label: 'maps-javascript' },
+  { key: 'geocoding',           czk: 'geocoding_czk',           label: 'geocoding' },
+  { key: 'openai_pdf',          czk: 'openai_pdf_czk',          label: 'openai-pdf' },
+  { key: 'here_route_cost',     czk: 'here_route_cost_czk',     label: 'here-route-cost' },
+  { key: 'tollguru_route_cost', czk: 'tollguru_route_cost_czk', label: 'tollguru-route-cost' },
+]
+
+const fmtCzk = (n: number) =>
+  n > 0 ? n.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '\u00a0Kč' : null
+
+const ApiRequestsByCompanyTable = ({ rows, loading, error }: ARBCProps) => {
+  const [companyModal, setCompanyModal] = React.useState<number | null>(null)
+
+  if (loading) return <div className="flex justify-center py-16"><Spinner size={8} /></div>
+  if (error) return <div className="text-red-600 py-8 px-4">{error}</div>
+  if (rows.length === 0) return <div className="text-gray-400 py-8 px-4 text-sm">Žádná data.</div>
+
+  const usdRate = rows[0]?.usd_rate
+
+  return (
+    <>
+      {companyModal != null && <CompanyDetailModal companyKey={String(companyModal)} onClose={() => setCompanyModal(null)} />}
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-xs border-collapse">
+          <thead>
+            <tr className="bg-gray-100 text-gray-600 uppercase tracking-wide text-[11px]">
+              <th className="px-2 py-2 text-right border-b w-8">#</th>
+              <th className="px-2 py-2 text-right border-b whitespace-nowrap">company_key</th>
+              <th className="px-2 py-2 text-left border-b">
+                company
+                {usdRate && <span className="ml-2 font-normal normal-case text-gray-400">kurz USD {usdRate} Kč</span>}
+              </th>
+              {ARBC_COLS.map(c => (
+                <th key={c.key} className="px-2 py-2 text-right border-b whitespace-nowrap font-mono">{c.label}</th>
+              ))}
+              <th className="px-2 py-2 text-right border-b whitespace-nowrap font-semibold">celkem</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.company_key} className="border-b hover:bg-gray-50">
+                <td className="px-2 py-1.5 text-right text-gray-400 tabular-nums">{i + 1}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">
+                  <button onClick={() => setCompanyModal(r.company_key)}
+                    className="text-teal-700 hover:underline hover:text-teal-900 tabular-nums">
+                    {r.company_key}
+                  </button>
+                </td>
+                <td className="px-2 py-1.5 font-medium whitespace-nowrap">{r.company}</td>
+                {ARBC_COLS.map(c => {
+                  const cnt = r[c.key] as number
+                  const czk = fmtCzk(r[c.czk] as number)
+                  return (
+                    <td key={c.key} className="px-2 py-1.5 text-right tabular-nums">
+                      {cnt > 0 ? (
+                        <>
+                          <div>{cnt.toLocaleString('cs-CZ')}</div>
+                          {czk && <div className="text-[10px] text-gray-400">{czk}</div>}
+                        </>
+                      ) : <span className="text-gray-300">—</span>}
+                    </td>
+                  )
+                })}
+                <td className="px-2 py-1.5 text-right tabular-nums">
+                  <div className="font-semibold text-gray-800">{r.occurrence_count.toLocaleString('cs-CZ')}</div>
+                  {fmtCzk(r.total_czk) && <div className="text-[10px] text-gray-400">{fmtCzk(r.total_czk)}</div>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )
+}
+
 // ── Hlavní stránka ───────────────────────────────────────────────────────────
 
 export const Queries = () => {
@@ -610,10 +704,14 @@ export const Queries = () => {
   const [fetched, setFetched] = React.useState(false)
   const [offset, setOffset] = React.useState(0)
 
+  // Filtr pro API requests
+  const [apiDays, setApiDays] = React.useState<number>(30)
+
   // Data per dotaz
   const [rsRows, setRsRows] = React.useState<ReportsScheduleRow[]>([])
   const [apRows, setApRows] = React.useState<AiPromptRow[]>([])
   const [abncRows, setAbncRows] = React.useState<AddressBookNoCompanyRow[]>([])
+  const [arbcRows, setArbcRows] = React.useState<ApiRequestsByCompanyRow[]>([])
 
   const PAGE_SIZE = 100
 
@@ -642,6 +740,10 @@ export const Queries = () => {
         const data = await getAddressBookNoCompany()
         setAbncRows(data)
         setOffset(0)
+      } else if (activeQuery === 'api-requests-by-company') {
+        const data = await getApiRequestsByCompany(apiDays)
+        setArbcRows(data)
+        setOffset(0)
       }
       setFetched(true)
     } catch (e: any) {
@@ -663,7 +765,7 @@ export const Queries = () => {
             {QUERIES.map(q => (
               <button
                 key={q.id}
-                onClick={() => { setActiveQuery(q.id); setFetched(false); setRsRows([]); setApRows([]); setAbncRows([]); setError(null); setCompanyKey(''); setType(''); setOneTime(''); setOffset(0) }}
+                onClick={() => { setActiveQuery(q.id); setFetched(false); setRsRows([]); setApRows([]); setAbncRows([]); setArbcRows([]); setError(null); setCompanyKey(''); setType(''); setOneTime(''); setOffset(0) }}
                 className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
                   activeQuery === q.id
                     ? 'bg-teal-50 text-teal-800 font-medium border-r-2 border-teal-600'
@@ -687,9 +789,24 @@ export const Queries = () => {
               {QUERIES.find(q => q.id === activeQuery)?.description}
             </p>
 
-            {(activeQuery === 'reports-schedule' || activeQuery === 'ai-prompt' || activeQuery === 'address-book-no-company') && (
+            {(activeQuery === 'reports-schedule' || activeQuery === 'ai-prompt' || activeQuery === 'address-book-no-company' || activeQuery === 'api-requests-by-company') && (
               <div className="flex flex-wrap items-end gap-3">
-                {activeQuery !== 'address-book-no-company' && (
+                {activeQuery === 'api-requests-by-company' && (
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Období</label>
+                    <select
+                      value={apiDays}
+                      onChange={e => setApiDays(Number(e.target.value))}
+                      className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:border-teal-500"
+                    >
+                      <option value={7}>7 dní</option>
+                      <option value={30}>30 dní</option>
+                      <option value={90}>90 dní</option>
+                      <option value={365}>365 dní</option>
+                    </select>
+                  </div>
+                )}
+                {activeQuery !== 'address-book-no-company' && activeQuery !== 'api-requests-by-company' && (
                   <>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1">company_key</label>
@@ -740,7 +857,9 @@ export const Queries = () => {
                       ? `${offset + 1}–${offset + rsRows.length}`
                       : activeQuery === 'address-book-no-company'
                         ? abncRows.length + ' záznamů'
-                        : apRows.length + ' záznamů'}
+                        : activeQuery === 'api-requests-by-company'
+                          ? arbcRows.length + ' firem'
+                          : apRows.length + ' záznamů'}
                   </span>
                 )}
               </div>
@@ -786,6 +905,9 @@ export const Queries = () => {
             {activeQuery === 'address-book-no-company' && (fetched || loading) && (
               <AddressBookNoCompanyTable rows={abncRows} loading={loading} error={error}
                 onRowDone={cin => setAbncRows(prev => prev.filter(r => r.cin !== cin))} />
+            )}
+            {activeQuery === 'api-requests-by-company' && (fetched || loading) && (
+              <ApiRequestsByCompanyTable rows={arbcRows} loading={loading} error={error} />
             )}
           </div>
         </div>
