@@ -89,20 +89,19 @@ jobs:
             ${{ env.WEB_IMAGE }}:${{ github.sha }}
 
   deploy:
-    name: Deploy to server
+    name: Deploy to ibm3
     runs-on: ubuntu-latest
     needs: docker
     if: github.ref == 'refs/heads/main'
 
+      # - name: Checkout
+      #   uses: actions/checkout@v4
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Prepare SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
         run: |
           set -e
 
@@ -115,35 +114,17 @@ jobs:
           PORT="${DEPLOY_PORT:-22}"
           ssh-keyscan -p "$PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
-      - name: Copy compose file
+      - name: Run server-side deployment
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          APP_DIR: ${{ env.APP_DIR }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          DEPLOY_TAG: ${{ github.ref_name }}
+          DEPLOY_REPO: ${{ github.repository }}
+          DEPLOY_SHA: ${{ github.sha }}          
         run: |
           set -e
 
           PORT="${DEPLOY_PORT:-22}"
 
-          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p $APP_DIR"
-          scp -P "$PORT" docker-compose.prod.yml "$DEPLOY_USER@$DEPLOY_HOST:$APP_DIR/docker-compose.yml"
-
-      - name: Pull and restart containers
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          APP_DIR: ${{ env.APP_DIR }}
-        run: |
-          set -e
-
-          PORT="${DEPLOY_PORT:-22}"
-
-          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "
-            set -e
-            cd $APP_DIR
-            docker compose pull
-            docker compose up -d --remove-orphans
-            docker image prune -f
-          "
+          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "/srv/data/docker-apps/admin.truckmanager.eu/deploy-admin-truckmanager-eu.sh '$DEPLOY_TAG' '$DEPLOY_REPO' '$DEPLOY_SHA'"
