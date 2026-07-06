@@ -290,7 +290,7 @@ export const Vyhledavani = () => {
         p.match = matchMode
       }
     }
-    if (matchMode === 'selecting' || (matchMode !== 'selecting' && !p.q)) {
+    if (matchMode === 'selecting' || !p.q) {
       // always send filter params when selecting, or as extra filter in text search
       if (filter.tariff !== 'all')      p.tariff = filter.tariff
       if (filter.contract_date_null)    p.contract_date_null = 'true'

@@ -140,8 +140,8 @@ export interface Driver {
   phone: string
   adr?: boolean
   active: boolean
-  wage_hourly?: number
-  wage_km?: number
+  wage_hourly?: number | null
+  wage_km?: number | null
   currency?: string
   expenses?: string
 }

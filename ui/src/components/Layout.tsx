@@ -103,7 +103,7 @@ const IconLogout = () => (
 )
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/overview',          label: 'Přehled 1',         icon: <IconDashboard /> },
+  { to: '/overview',          label: 'Přehled',           icon: <IconDashboard /> },
   { to: '/search',            label: 'Hledání',         icon: <IconSearch /> },
   { to: '/invoicing',          label: 'Fakturace',        icon: <IconInvoice /> },
   { label: 'Nabídky',         icon: <IconOffer />,      disabled: true },
@@ -134,7 +134,7 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
 
   const initials = user?.name
     ? user.name.split(' ').map((p: string) => p[0]).slice(0, 2).join('').toUpperCase()
-    : (user?.username ?? '?').slice(0, 2).toUpperCase()
+    : (user?.initials ?? '?').slice(0, 2).toUpperCase()
 
   const sidebarContent = (
     <>
@@ -147,7 +147,7 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
             title="Můj profil">
             {initials}
           </Link>
-          <span className="text-sm font-medium leading-tight truncate">{user?.name ?? user?.username}</span>
+          <span className="text-sm font-medium leading-tight truncate">{user?.name ?? user?.initials}</span>
         </div>
       </div>
 

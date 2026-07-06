@@ -278,7 +278,7 @@ const InvoiceTab = ({ isProforma }: { isProforma: boolean }) => {
     setLoading(true); setError(null)
     try {
       const res = await getInvoicingList({
-        year:        filters.year     || undefined,
+        year:        filters.year ? Number(filters.year) : undefined,
         company_key: filters.company_key || undefined,
         number:      filters.number   || undefined,
         series:      (!isProforma && filters.series) ? filters.series : undefined,
