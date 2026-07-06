@@ -1,0 +1,27 @@
+services:
+  api:
+    image: ghcr.io/janzimmermann80/admintm-api:latest
+    container_name: admintm-api
+    env_file:
+      - .env
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      BANK_DB_PATH: /data/bank.db
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+      PRINT_BASE_URL: http://web/new/invoicing
+    volumes:
+      - admintm-data:/data
+    restart: unless-stopped
+
+  web:
+    image: ghcr.io/janzimmermann80/admintm-web:latest
+    container_name: admintm-web
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:8083:80"
+    restart: unless-stopped
+
+volumes:
+  admintm-data:

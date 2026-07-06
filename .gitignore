@@ -4,6 +4,7 @@ ui/node_modules/
 
 # Build output
 ui/dist/
+dist
 
 # Environment & secrets
 .env
@@ -13,11 +14,14 @@ ui/dist/
 # Logs & runtime
 api.log
 *.log
+.git
+.github
 
 # Database
 bank.db
 bank.db-shm
 bank.db-wal
+data
 
 # Certs
 certs/
