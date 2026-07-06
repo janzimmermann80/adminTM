@@ -167,8 +167,15 @@ export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => 
   }, [companyKey])
 
   const handleTemplate = (tpl: EmailTemplate) => {
-    setSubject(applyCtx(tpl.subject, ctx))
-    setMessage(applyCtx(tpl.text, ctx))
+    // Odvození oslovení/jména příjemce (acc_name / acc_sex) podle vybraného příjemce.
+    // Backend posílá name{importance}/sex{importance}, šablony používají acc_name/acc_sex.
+    const rec = recipients.find(r => r.email === to) as any
+    const imp = rec?.importance
+    const fullCtx = { ...ctx }
+    fullCtx.acc_name = (imp != null && imp !== 0 ? ctx[`name${imp}`] : '') ?? ''
+    fullCtx.acc_sex = (imp != null && imp !== 0 ? ctx[`sex${imp}`] : '') ?? ''
+    setSubject(applyCtx(tpl.subject, fullCtx))
+    setMessage(applyCtx(tpl.text, fullCtx))
     setNoteType(tpl.note_type)
     setTab('send')
     setTimeout(() => msgRef.current?.focus(), 50)

@@ -56,7 +56,7 @@ export async function sendMailRoutes(app: FastifyInstance) {
 
       // Unsettled invoices past maturity
       const claims = await sql`
-        SELECT I.series, I.id, I.number, I.maturity, I.curr_total, I.currency
+        SELECT I.series, C.id, I.number, I.maturity, I.curr_total, I.currency
         FROM ${sql(schema + '.invoice')} AS I
         JOIN ${sql(schema + '.company')} AS C ON I.company_key = C.company_key
         WHERE I.company_key = ${companyKey}
@@ -160,7 +160,20 @@ export async function sendMailRoutes(app: FastifyInstance) {
     const senderInfo = SENDERS[body.sender] ?? SENDERS.D
 
     try {
-      const transport = nodemailer.createTransport({ sendmail: true, newline: 'unix', path: '/usr/sbin/sendmail' })
+      const transport = process.env.SMTP_HOST
+        ? nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: Number(process.env.SMTP_PORT ?? 587),
+            secure: false,
+            auth: process.env.SMTP_USER
+              ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+              : undefined,
+          })
+        : nodemailer.createTransport({
+            sendmail: true,
+            newline: 'unix',
+            path: process.env.SENDMAIL_PATH ?? '/usr/sbin/sendmail',
+          })
 
       const msgHtml = body.message.replace(/\n/g, '<br>').replace(/<s>/g, '&nbsp;')
 
@@ -203,5 +216,32 @@ export async function sendMailRoutes(app: FastifyInstance) {
     } finally {
       await sql.end()
     }
+  })
+
+  // GET /api/send-mail/templates — uložené e-mailové šablony (JSON soubor).
+  // Cesta je konfigurovatelná přes env EMAIL_TEMPLATES_PATH. Pokud soubor
+  // neexistuje, vrátí [] a front-end použije vestavěné výchozí šablony.
+  app.get('/templates', {
+    onRequest: [(app as any).authenticate],
+  }, async (_request: FastifyRequest, reply: FastifyReply) => {
+    const fs = await import('fs/promises')
+    const path = process.env.EMAIL_TEMPLATES_PATH ?? '/home/dev/email_templates.json'
+    try {
+      const data = await fs.readFile(path, 'utf-8')
+      return reply.send(JSON.parse(data))
+    } catch {
+      return reply.send([])
+    }
+  })
+
+  // PUT /api/send-mail/templates — uloží celé pole šablon do JSON souboru.
+  app.put('/templates', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const fs = await import('fs/promises')
+    const path = process.env.EMAIL_TEMPLATES_PATH ?? '/home/dev/email_templates.json'
+    const body = request.body as any[]
+    await fs.writeFile(path, JSON.stringify(body, null, 2), 'utf-8')
+    return reply.send({ success: true })
   })
 }

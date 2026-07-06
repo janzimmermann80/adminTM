@@ -14,6 +14,12 @@ interface SearchQuery {
   region?: string
   zip?: string
 
+  // vehicle / SIM search (SearchB)
+  car_key?: string
+  spz?: string
+  imsi?: string
+  tm_tel?: string
+
   // date filters on company_detail
   contract_date_from?: string
   contract_date_to?: string
@@ -126,6 +132,12 @@ export async function searchRoutes(app: FastifyInstance) {
     if (q.country) whereClauses.push(`C.country = ${addParam(q.country)}`)
     if (q.region)  whereClauses.push(`C.region = ${addParam(q.region)}`)
     if (q.zip)     whereClauses.push(`C.zip ILIKE ${addParam(q.zip + '%')}`)
+
+    // --- vehicle / SIM filters (SearchB) ---
+    if (q.car_key) whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.car_base WHERE car_key = ${addParam(Number(q.car_key))})`)
+    if (q.spz)     whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.car_base WHERE spz ILIKE ${addParam('%' + q.spz + '%')})`)
+    if (q.imsi)    whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.simcard_base WHERE imsi ILIKE ${addParam(q.imsi + '%')})`)
+    if (q.tm_tel)  whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.simcard_base WHERE number ILIKE ${addParam('%' + q.tm_tel + '%')})`)
 
     // --- company_detail date filters ---
     const detailClauses: string[] = []

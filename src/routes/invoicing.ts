@@ -44,6 +44,64 @@ interface CreateInvoiceBody {
   items: InvoiceItem[]        // vybrané položky
 }
 
+// Tělo pro vystavení/editaci jedné faktury (z detailu firmy)
+interface SingleInvoiceBody {
+  company_key?: number
+  issued: string
+  fulfilment: string
+  maturity: string
+  settlement?: string | null
+  series: number
+  payment_method: string
+  currency: string
+  curr_value: number
+  proforma_number?: number | null
+  demand_notes?: number
+  items: InvoiceItem[]
+}
+
+// Výpočet součtů faktury z položek (sdílené pro create/update)
+function computeInvoiceTotals(items: InvoiceItem[], currValue: number) {
+  let priceLow = 0, priceHigh = 0, vatLow = 0, vatHigh = 0
+  let vatLowRate = 0, vatHighRate = 0
+  const calcItems: Array<{
+    name: string; priceUnit: number; discount: number; priceSale: number
+    quantity: number; price: number; vatRate: number; vat: number; priceTotal: number
+  }> = []
+
+  for (const item of items) {
+    const disc = (100 - item.discount) / 100
+    const priceSale = item.price_unit * disc
+    const price = priceSale * item.quantity
+    const vatId = (item.vat_rate + 100) / 100
+    const priceTotal = Math.round(price * vatId * 100) / 100
+    const vat = priceTotal - price
+
+    if (item.vat_rate < 17) {
+      vatLowRate = item.vat_rate
+      vatLow += vat
+      priceLow += price
+    } else {
+      vatHighRate = item.vat_rate
+      vatHigh += vat
+      priceHigh += price
+    }
+
+    calcItems.push({ name: item.name, priceUnit: item.price_unit, discount: item.discount, priceSale, quantity: item.quantity, price, vatRate: item.vat_rate, vat, priceTotal })
+  }
+
+  const priceSum = priceLow + priceHigh
+  const totalSum = priceSum + vatLow + vatHigh
+  return {
+    priceLow, priceHigh, vatLow, vatHigh, vatLowRate, vatHighRate, priceSum, totalSum,
+    currPrice: priceSum * currValue,
+    currTotal: totalSum * currValue,
+    currVatLow: vatLow * currValue,
+    currVatHigh: vatHigh * currValue,
+    calcItems,
+  }
+}
+
 export async function invoicingRoutes(app: FastifyInstance) {
 
   // GET /api/invoicing/services — položky pro fakturu
@@ -70,6 +128,35 @@ export async function invoicingRoutes(app: FastifyInstance) {
     onRequest: [(app as any).authenticate],
   }, async (_request: FastifyRequest, reply: FastifyReply) => {
     return reply.send({ series: SERIES_NAMES, payment_methods: PAYMENT_METHODS })
+  })
+
+  // GET /api/invoicing/cnb-rate/:code — denní kurz ČNB pro danou měnu (na 1 jednotku)
+  app.get('/cnb-rate/:code', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { code } = request.params as { code: string }
+    const upper = (code ?? '').trim().toUpperCase()
+    if (upper === 'CZK') return reply.send({ code: 'CZK', rate: 1, date: '' })
+    try {
+      const res = await fetch(
+        'https://www.cnb.cz/cs/financni-trhy/devizovy-trh/kurzy-devizoveho-trhu/kurzy-devizoveho-trhu/denni_kurz.txt',
+      )
+      if (!res.ok) throw new Error('CNB HTTP ' + res.status)
+      const txt = await res.text()
+      const lines = txt.split('\n')
+      // 1. řádek: "DD.MM.YYYY #NNN"
+      const date = (lines[0].trim().match(/^\d{2}\.\d{2}\.\d{4}/)?.[0]) ?? ''
+      // Řádek formátu: země|měna|množství|kód|kurz
+      const line = lines.find((l) => l.split('|')[3] === upper)
+      if (!line) return reply.code(404).send({ error: `Měna ${upper} nenalezena v kurzovním lístku ČNB` })
+      const parts = line.trim().split('|')
+      const amount = Number(parts[2].replace(',', '.')) || 1
+      const rate = Number(parts[4].replace(',', '.')) / amount
+      if (!rate || !isFinite(rate)) throw new Error('bad rate')
+      return reply.send({ code: upper, rate: Math.round(rate * 1000) / 1000, date })
+    } catch (e: any) {
+      return reply.code(502).send({ error: 'Nepodařilo se načíst kurz ČNB: ' + (e?.message ?? 'chyba') })
+    }
   })
 
   // GET /api/invoicing — seznam faktur s filtry
@@ -418,6 +505,176 @@ export async function invoicingRoutes(app: FastifyInstance) {
         WHERE invoice_key = ${id}
       `
       return reply.send({ success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // POST /api/invoicing/create — vystavení jedné faktury z detailu firmy
+  app.post('/create', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb, provider } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const body = request.body as SingleInvoiceBody
+
+    if (!body.company_key || !body.items?.length) {
+      await sql.end()
+      return reply.code(400).send({ error: 'Chybí firma nebo položky faktury' })
+    }
+
+    const currValue = body.curr_value || 1
+    const year = Number(String(body.issued).slice(0, 4)) || new Date().getFullYear()
+    const c = computeInvoiceTotals(body.items, currValue)
+
+    try {
+      const maxResult = await sql`
+        SELECT MAX(number) AS max_num
+        FROM provider.invoice
+        WHERE year = ${year} AND currency = ${body.currency} AND provider = ${provider}
+      `
+      const nextNum = maxResult[0]?.max_num ? Number(maxResult[0].max_num) + 1
+        : (body.currency === 'CZK' ? 1 : 9000)
+
+      const [inv] = await sql`
+        INSERT INTO provider.invoice (
+          company_key, year, number, provider, series, issued, maturity, fulfilment, settlement,
+          price, price_low, price_high, vat_low_rate, vat_low, vat_high_rate, vat_high,
+          total, curr_price, curr_vat_low, curr_vat_high, curr_total,
+          payment_method, currency, rate, demand_notes, proforma_number
+        ) VALUES (
+          ${body.company_key}, ${year}, ${nextNum}, ${provider}, ${body.series},
+          ${body.issued}, ${body.maturity}, ${body.fulfilment}, ${body.settlement ?? null},
+          ${c.priceSum}, ${c.priceLow}, ${c.priceHigh}, ${c.vatLowRate}, ${c.vatLow},
+          ${c.vatHighRate}, ${c.vatHigh}, ${c.totalSum},
+          ${c.currPrice}, ${c.currVatLow}, ${c.currVatHigh}, ${c.currTotal},
+          ${body.payment_method}, ${body.currency}, ${currValue}, ${body.demand_notes ?? 0},
+          ${body.proforma_number ?? null}
+        )
+        RETURNING invoice_key
+      `
+
+      for (const ci of c.calcItems) {
+        await sql`
+          INSERT INTO provider.invoice_item (
+            invoice_key, name, price_unit, discount, price_sale,
+            quantity, price, vat_rate, vat, price_total, currency
+          ) VALUES (
+            ${inv.invoice_key}, ${ci.name}, ${ci.priceUnit},
+            ${ci.discount}, ${ci.priceSale},
+            ${ci.quantity}, ${ci.price},
+            ${ci.vatRate}, ${ci.vat}, ${ci.priceTotal},
+            ${body.currency}
+          )
+        `
+      }
+
+      return reply.code(201).send({ invoice_key: inv.invoice_key })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // PUT /api/invoicing/:id — editace faktury (přepočítá součty i položky)
+  app.put('/:id', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    const body = request.body as SingleInvoiceBody
+
+    if (!body.items?.length) {
+      await sql.end()
+      return reply.code(400).send({ error: 'Faktura musí mít alespoň jednu položku' })
+    }
+
+    const currValue = body.curr_value || 1
+    const c = computeInvoiceTotals(body.items, currValue)
+
+    try {
+      const upd = await sql`
+        UPDATE provider.invoice SET
+          issued = ${body.issued}, fulfilment = ${body.fulfilment}, maturity = ${body.maturity},
+          settlement = ${body.settlement ?? null}, series = ${body.series},
+          payment_method = ${body.payment_method}, currency = ${body.currency}, rate = ${currValue},
+          proforma_number = ${body.proforma_number ?? null}, demand_notes = ${body.demand_notes ?? 0},
+          price = ${c.priceSum}, price_low = ${c.priceLow}, price_high = ${c.priceHigh},
+          vat_low_rate = ${c.vatLowRate}, vat_low = ${c.vatLow},
+          vat_high_rate = ${c.vatHighRate}, vat_high = ${c.vatHigh}, total = ${c.totalSum},
+          curr_price = ${c.currPrice}, curr_vat_low = ${c.currVatLow},
+          curr_vat_high = ${c.currVatHigh}, curr_total = ${c.currTotal}
+        WHERE invoice_key = ${id}
+        RETURNING invoice_key
+      `
+      if (upd.length === 0) return reply.code(404).send({ error: 'Faktura nenalezena' })
+
+      await sql`DELETE FROM provider.invoice_item WHERE invoice_key = ${id}`
+      for (const ci of c.calcItems) {
+        await sql`
+          INSERT INTO provider.invoice_item (
+            invoice_key, name, price_unit, discount, price_sale,
+            quantity, price, vat_rate, vat, price_total, currency
+          ) VALUES (
+            ${id}, ${ci.name}, ${ci.priceUnit},
+            ${ci.discount}, ${ci.priceSale},
+            ${ci.quantity}, ${ci.price},
+            ${ci.vatRate}, ${ci.vat}, ${ci.priceTotal},
+            ${body.currency}
+          )
+        `
+      }
+
+      return reply.send({ invoice_key: Number(id), success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // DELETE /api/invoicing/:id — smazání faktury i s položkami
+  app.delete('/:id', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+
+    try {
+      await sql`DELETE FROM provider.invoice_item WHERE invoice_key = ${id}`
+      await sql`DELETE FROM provider.invoice WHERE invoice_key = ${id}`
+      return reply.send({ success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/invoicing/:id/pdf — vygenerování PDF faktury
+  app.get('/:id/pdf', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    const token = ((request as any).headers.authorization as string ?? '').replace('Bearer ', '')
+    try {
+      const rows = await sql`
+        SELECT I.series, I.number, I.year, C.id AS company_id
+        FROM provider.invoice AS I
+        LEFT JOIN provider.company AS C ON I.company_key = C.company_key
+        WHERE I.invoice_key = ${id}
+      `
+      if (rows.length === 0) return reply.code(404).send({ error: 'Faktura nenalezena' })
+      const inv = rows[0]
+      const vs = `${inv.series}${String(inv.company_id ?? '').slice(-5)}${String(inv.number).padStart(4, '0')}`
+      const filename = `faktura_${inv.year}_${vs}.pdf`
+      const pdfBuffer = await generateInvoicePdf(Number(id), token)
+      return reply
+        .header('Content-Type', 'application/pdf')
+        .header('Content-Disposition', `inline; filename="${filename}"`)
+        .send(pdfBuffer)
+    } catch (err: any) {
+      request.log.error({ err }, 'invoice pdf failed')
+      return reply.code(500).send({ error: err.message })
     } finally {
       await sql.end()
     }

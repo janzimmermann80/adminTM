@@ -121,6 +121,94 @@ export async function companiesRoutes(app: FastifyInstance) {
     }
   })
 
+  // GET /api/companies/:id/summary - přehledové počty (auta, SIM, zakázky, faktury, objednávky)
+  app.get('/:id/summary', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+
+    try {
+      const [r] = await sql`
+        SELECT
+          (SELECT count(*)::int FROM gps.car_base WHERE company_key = ${id}) AS cars_total,
+          (SELECT count(*)::int FROM gps.car_base cb
+             JOIN gps.last_upload_log lul ON lul.car_key = cb.car_key
+             WHERE cb.company_key = ${id} AND lul.time >= now() - interval '7 days') AS cars_active,
+          (SELECT count(*)::int FROM gps.simcard_base WHERE company_key = ${id}) AS sims_total,
+          (SELECT count(*)::int FROM gps.simcard_base WHERE company_key = ${id} AND ie_disabled IS NOT TRUE) AS sims_active,
+          (SELECT count(*)::int FROM ta.obligation_base WHERE company_key = ${id}) AS obl_total,
+          (SELECT count(*)::int FROM ta.obligation_base WHERE company_key = ${id} AND created_time >= now() - interval '7 days') AS obl_recent,
+          (SELECT count(*)::int FROM ta.invoice_base WHERE company_key = ${id}) AS inv_total,
+          (SELECT count(*)::int FROM ta.invoice_base WHERE company_key = ${id} AND issued >= (now() - interval '7 days')::date) AS inv_recent,
+          (SELECT count(*)::int FROM ta.order_base WHERE company_key = ${id}) AS ord_total,
+          (SELECT count(*)::int FROM ta.order_base WHERE company_key = ${id} AND created_time >= now() - interval '7 days') AS ord_recent
+      `
+      return reply.send({
+        cars:        { active: r.cars_active, total: r.cars_total },
+        sims:        { active: r.sims_active, total: r.sims_total },
+        obligations: { recent: r.obl_recent, total: r.obl_total },
+        invoices:    { recent: r.inv_recent, total: r.inv_total },
+        orders:      { recent: r.ord_recent, total: r.ord_total },
+      })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/companies/:id/impersonate - přihlašovací URL do TruckManageru za daného uživatele
+  app.get('/:id/impersonate', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { type, username } = request.query as { type?: string; username?: string }
+
+    if (!username) {
+      await sql.end()
+      return reply.code(400).send({ error: 'Chybí username' })
+    }
+
+    try {
+      const [row] = await sql`SELECT provider.login_auth_code(${username}) AS code`
+      const code = row?.code
+      if (!code) return reply.code(404).send({ error: 'Uživatele nelze přihlásit (nenalezen)' })
+
+      // Přihlašovací URL do TruckManageru (auto-login route). Base je konfigurovatelná přes env.
+      const loginBase = type === 'devel'
+        ? (process.env.TM_IMPERSONATE_URL_DEVEL ?? 'https://app2.truckmanager.eu/#/(left:auto-login)')
+        : (process.env.TM_IMPERSONATE_URL_APP ?? 'https://app.truckmanager.eu/#/(left:auto-login)')
+      return reply.send({ url: `${loginBase}?code=${code}` })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // POST /api/companies/:id/extend-access - prodloužení přístupu o N měsíců
+  app.post('/:id/extend-access', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    const { months } = request.body as { months?: number }
+    const days = Math.round((Number(months) || 1) * 30)
+
+    try {
+      const [row] = await sql`
+        UPDATE provider.company_detail SET
+          admittance_date = (GREATEST(COALESCE(admittance_date, CURRENT_DATE), CURRENT_DATE) + (${days} * INTERVAL '1 day'))::date
+        WHERE company_key = ${id}
+        RETURNING admittance_date
+      `
+      if (!row) return reply.code(404).send({ error: 'Firma nenalezena' })
+      return reply.send({ admittance_date: row.admittance_date })
+    } finally {
+      await sql.end()
+    }
+  })
+
   // POST /api/companies - create new company
   app.post('/', {
     onRequest: [(app as any).authenticate],
@@ -189,8 +277,8 @@ export async function companiesRoutes(app: FastifyInstance) {
           tin     = COALESCE(${body.tin ?? null}, tin),
           bank    = COALESCE(${body.bank ?? null}, bank),
           account = COALESCE(${body.account ?? null}, account),
-          branch  = COALESCE(${body.branch ?? null}, branch),
-          tariff  = COALESCE(${body.tariff ?? null}, tariff),
+          branch  = COALESCE(NULLIF(${body.branch ?? null}, ''), branch),
+          tariff  = COALESCE(NULLIF(${body.tariff ?? null}, ''), tariff),
           region  = COALESCE(${body.region ?? null}, region),
           last_modif = ${now}
         WHERE company_key = ${id}
@@ -263,6 +351,25 @@ export async function companiesRoutes(app: FastifyInstance) {
         LIMIT ${limit} OFFSET ${offset}
       `
       return reply.send({ total: count, limit, offset, data: rows })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/companies/:id/invoices/count-unpaid - počet neuhrazených (nezaplacených, nestornovaných) faktur
+  app.get('/:id/invoices/count-unpaid', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+
+    try {
+      const [{ count }] = await sql`
+        SELECT count(*)::int AS count FROM provider.invoice
+        WHERE company_key = ${id} AND settlement IS NULL AND cancellation IS NULL
+      `
+      return reply.send({ count })
     } finally {
       await sql.end()
     }
@@ -408,6 +515,22 @@ export async function companiesRoutes(app: FastifyInstance) {
           home_stand_key    = ${body.home_stand_key !== undefined ? body.home_stand_key : sql`home_stand_key`}
         WHERE car_key = ${vid}
       `
+      return reply.send({ success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // DELETE /api/companies/:id/vehicles/:vid - delete vehicle
+  app.delete('/:id/vehicles/:vid', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { vid } = request.params as { id: string; vid: string }
+
+    try {
+      await sql`DELETE FROM gps.car_base WHERE car_key = ${vid}`
       return reply.send({ success: true })
     } finally {
       await sql.end()
@@ -875,6 +998,43 @@ export async function companiesRoutes(app: FastifyInstance) {
         SELECT tariff, name FROM gps.simcard_tariff ORDER BY name
       `
       return reply.send(rows)
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // POST /api/companies/:id/simcards - nová SIM karta
+  app.post('/:id/simcards', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    const body = request.body as {
+      imsi: string; number?: string; tariff?: string | null; price?: number | null
+      our_sim?: boolean; ie_disabled?: boolean; serial_number?: string | null
+      upload_home?: number | null; upload_abroad1?: number | null; upload_abroad2?: number | null
+    }
+
+    if (!body.imsi) {
+      await sql.end()
+      return reply.code(400).send({ error: 'Chybí IMSI' })
+    }
+
+    try {
+      const [row] = await sql`
+        INSERT INTO gps.simcard_base (
+          company_key, imsi, number, tariff, price, our_sim, ie_disabled, serial_number,
+          upload_home, upload_abroad1, upload_abroad2
+        ) VALUES (
+          ${id}, ${body.imsi}, ${body.number ?? ''}, ${body.tariff ?? ''},
+          ${body.price ?? null}, ${body.our_sim ?? false}, ${body.ie_disabled ?? false},
+          ${body.serial_number ?? null}, ${body.upload_home ?? null},
+          ${body.upload_abroad1 ?? null}, ${body.upload_abroad2 ?? null}
+        )
+        RETURNING imsi
+      `
+      return reply.code(201).send(row)
     } finally {
       await sql.end()
     }

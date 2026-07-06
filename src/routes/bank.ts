@@ -176,6 +176,16 @@ export async function bankRoutes(app: FastifyInstance) {
     }
   })
 
+  // DELETE /api/bank/statements/:id — smazání výpisu (transakce se smažou kaskádou)
+  app.delete('/statements/:id', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { id } = request.params as { id: string }
+    const result = db.prepare('DELETE FROM bank_statements WHERE id = ?').run(Number(id))
+    if (result.changes === 0) return reply.status(404).send({ error: 'Not found' })
+    return reply.send({ ok: true })
+  })
+
   // GET /api/bank/transactions — seznam transakcí
   app.get('/transactions', {
     onRequest: [(app as any).authenticate],

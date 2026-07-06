@@ -16,8 +16,24 @@ import { campaignsRoutes } from './routes/campaigns.js'
 import { offersRoutes } from './routes/offers.js'
 import { chatRoutes } from './routes/chat.js'
 import { bankRoutes } from './routes/bank.js'
+import { queriesRoutes } from './routes/queries.js'
+import { workersRoutes } from './routes/workers.js'
 
 const app = Fastify({ logger: true })
+
+// Povolit prázdné tělo u application/json (DELETE requesty bez těla)
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (_req, body, done) => {
+  if (body === '' || body == null) {
+    done(null, undefined)
+    return
+  }
+  try {
+    done(null, JSON.parse(body as string))
+  } catch (err) {
+    ;(err as any).statusCode = 400
+    done(err as Error, undefined)
+  }
+})
 
 // CORS
 await app.register(cors, {
@@ -55,6 +71,8 @@ await app.register(campaignsRoutes, { prefix: '/api/campaigns' })
 await app.register(offersRoutes, { prefix: '/api/offers' })
 await app.register(chatRoutes, { prefix: '/api/chat' })
 await app.register(bankRoutes, { prefix: '/api/bank' })
+await app.register(queriesRoutes, { prefix: '/api/queries' })
+await app.register(workersRoutes, { prefix: '/api/workers' })
 
 // Health check
 app.get('/health', async () => ({ status: 'ok' }))
