@@ -127,4 +127,4 @@ jobs:
 
           PORT="${DEPLOY_PORT:-22}"
 
-          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "/srv/data/docker-apps/admin.truckmanager.eu/deploy-admin-truckmanager-eu.sh '$DEPLOY_TAG' '$DEPLOY_REPO' '$DEPLOY_SHA'"
+          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "${{ env.APP_DIR }}/deploy-admin-truckmanager-eu.sh '$DEPLOY_TAG' '$DEPLOY_REPO' '$DEPLOY_SHA'"
