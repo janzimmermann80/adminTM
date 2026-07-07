@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getUserSql } from '../db/userSql.js'
 import nodemailer from 'nodemailer'
 import { generateInvoicePdf } from '../services/invoicePdf.js'
+import QRCode from 'qrcode'
 
 export const SERIES_NAMES: Record<number, string> = {
   1: '1-Internet', 2: '2-Modem Euro', 3: '3-Modem CZ', 4: '4-INFAX',
@@ -251,7 +252,14 @@ export async function invoicingRoutes(app: FastifyInstance) {
       ])
 
       if (invoice.length === 0) return reply.code(404).send({ error: 'Faktura nenalezena' })
-      return reply.send({ ...invoice[0], items })
+      const inv0 = invoice[0] as any
+      const qrVs = `${inv0.series}${String(inv0.company_id ?? '').slice(-5)}${String(inv0.number).padStart(4, '0')}`
+      const qrAmt = Number(inv0.curr_total ?? inv0.total ?? 0).toFixed(2)
+      const qrCcy = String(inv0.currency ?? 'CZK')
+      const ibanRaw = qrCcy === 'EUR' ? 'CZ7703000000000349438195' : 'CZ2703000000000226164811'
+      const qrStr = `SPD*1.0*ACC:${ibanRaw}*AM:${qrAmt}*CC:${qrCcy}*X-VS:${qrVs}`
+      const qr_data_url = await QRCode.toDataURL(qrStr, { width: 160, margin: 1, color: { dark: '#000000', light: '#ffffff' } }).catch(() => '')
+      return reply.send({ ...inv0, items, qr_data_url })
     } finally {
       await sql.end()
     }
@@ -285,15 +293,20 @@ export async function invoicingRoutes(app: FastifyInstance) {
       const vs = `${inv.series}${String(inv.company_id ?? '').slice(-5)}${String(inv.number).padStart(4, '0')}`
       const filename = `faktura_${inv.year}_${vs}.pdf`
 
-      const transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST ?? 'smtp.gmail.com',
-        port: Number(process.env.SMTP_PORT ?? 587),
-        secure: false,
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
-      })
+      const transporter = process.env.SMTP_HOST
+        ? nodemailer.createTransport({
+            host: process.env.SMTP_HOST,
+            port: Number(process.env.SMTP_PORT ?? 587),
+            secure: false,
+            auth: process.env.SMTP_USER
+              ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+              : undefined,
+          })
+        : nodemailer.createTransport({
+            sendmail: true,
+            newline: 'unix',
+            path: process.env.SENDMAIL_PATH ?? '/usr/sbin/sendmail',
+          })
 
       await transporter.sendMail({
         from: '"1. Česká obchodní, s.r.o." <info@truckmanager.eu>',

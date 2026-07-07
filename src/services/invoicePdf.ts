@@ -1,7 +1,7 @@
 import puppeteer from 'puppeteer'
 
 const CHROME = process.env.PUPPETEER_EXECUTABLE_PATH
-const PRINT_BASE_URL = process.env.PRINT_BASE_URL ?? 'http://localhost/new/invoicing'
+const PRINT_BASE_URL = process.env.PRINT_BASE_URL ?? 'http://localhost/new/#/invoicing'
 
 export async function generateInvoicePdf(invoiceKey: number, token: string): Promise<Buffer> {
   const browser = await puppeteer.launch({
