@@ -103,6 +103,43 @@ function computeInvoiceTotals(items: InvoiceItem[], currValue: number) {
   }
 }
 
+// Načtení detailu faktury + položek + QR (sdílené pro detail, PDF i email)
+async function loadInvoiceData(sql: any, id: string | number): Promise<any | null> {
+  const [invoice, items] = await Promise.all([
+    sql`
+      SELECT I.invoice_key, I.year, I.number, I.series, I.provider,
+             I.issued, I.fulfilment, I.maturity, I.settlement, I.cancellation,
+             I.price, I.price_low, I.price_high, I.vat_low_rate, I.vat_low,
+             I.vat_high_rate, I.vat_high, I.total, I.curr_price, I.curr_total,
+             I.currency, I.rate, I.payment_method, I.demand_notes, I.proforma_number,
+             C.company_key, C.id AS company_id, C.company, C.street, C.city, C.zip,
+             C.country, C.cin, C.tin, C.bank, C.account,
+             CIA.company AS inv_company, CIA.street AS inv_street,
+             CIA.city AS inv_city, CIA.zip AS inv_zip, CIA.country AS inv_country
+      FROM provider.invoice AS I
+      LEFT JOIN provider.company AS C ON I.company_key = C.company_key
+      LEFT JOIN provider.company_invoice_address AS CIA ON C.company_key = CIA.company_key
+      WHERE I.invoice_key = ${id}
+    `,
+    sql`
+      SELECT item_key, name, price_unit, discount, price_sale,
+             quantity, price, vat_rate, vat, price_total, currency
+      FROM provider.invoice_item
+      WHERE invoice_key = ${id}
+      ORDER BY item_key
+    `,
+  ])
+  if (invoice.length === 0) return null
+  const inv0 = invoice[0] as any
+  const qrVs = `${inv0.series}${String(inv0.company_id ?? '').slice(-5)}${String(inv0.number).padStart(4, '0')}`
+  const qrAmt = Number(inv0.curr_total ?? inv0.total ?? 0).toFixed(2)
+  const qrCcy = String(inv0.currency ?? 'CZK')
+  const ibanRaw = qrCcy === 'EUR' ? 'CZ7703000000000349438195' : 'CZ2703000000000226164811'
+  const qrStr = `SPD*1.0*ACC:${ibanRaw}*AM:${qrAmt}*CC:${qrCcy}*X-VS:${qrVs}`
+  const qr_data_url = await QRCode.toDataURL(qrStr, { width: 160, margin: 1, color: { dark: '#000000', light: '#ffffff' } }).catch(() => '')
+  return { ...inv0, items, qr_data_url }
+}
+
 export async function invoicingRoutes(app: FastifyInstance) {
 
   // GET /api/invoicing/services — položky pro fakturu
@@ -226,40 +263,9 @@ export async function invoicingRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string }
 
     try {
-      const [invoice, items] = await Promise.all([
-        sql`
-          SELECT I.invoice_key, I.year, I.number, I.series, I.provider,
-                 I.issued, I.fulfilment, I.maturity, I.settlement, I.cancellation,
-                 I.price, I.price_low, I.price_high, I.vat_low_rate, I.vat_low,
-                 I.vat_high_rate, I.vat_high, I.total, I.curr_price, I.curr_total,
-                 I.currency, I.rate, I.payment_method, I.demand_notes, I.proforma_number,
-                 C.company_key, C.id AS company_id, C.company, C.street, C.city, C.zip,
-                 C.country, C.cin, C.tin, C.bank, C.account,
-                 CIA.company AS inv_company, CIA.street AS inv_street,
-                 CIA.city AS inv_city, CIA.zip AS inv_zip, CIA.country AS inv_country
-          FROM provider.invoice AS I
-          LEFT JOIN provider.company AS C ON I.company_key = C.company_key
-          LEFT JOIN provider.company_invoice_address AS CIA ON C.company_key = CIA.company_key
-          WHERE I.invoice_key = ${id}
-        `,
-        sql`
-          SELECT item_key, name, price_unit, discount, price_sale,
-                 quantity, price, vat_rate, vat, price_total, currency
-          FROM provider.invoice_item
-          WHERE invoice_key = ${id}
-          ORDER BY item_key
-        `,
-      ])
-
-      if (invoice.length === 0) return reply.code(404).send({ error: 'Faktura nenalezena' })
-      const inv0 = invoice[0] as any
-      const qrVs = `${inv0.series}${String(inv0.company_id ?? '').slice(-5)}${String(inv0.number).padStart(4, '0')}`
-      const qrAmt = Number(inv0.curr_total ?? inv0.total ?? 0).toFixed(2)
-      const qrCcy = String(inv0.currency ?? 'CZK')
-      const ibanRaw = qrCcy === 'EUR' ? 'CZ7703000000000349438195' : 'CZ2703000000000226164811'
-      const qrStr = `SPD*1.0*ACC:${ibanRaw}*AM:${qrAmt}*CC:${qrCcy}*X-VS:${qrVs}`
-      const qr_data_url = await QRCode.toDataURL(qrStr, { width: 160, margin: 1, color: { dark: '#000000', light: '#ffffff' } }).catch(() => '')
-      return reply.send({ ...inv0, items, qr_data_url })
+      const data = await loadInvoiceData(sql, id)
+      if (!data) return reply.code(404).send({ error: 'Faktura nenalezena' })
+      return reply.send(data)
     } finally {
       await sql.end()
     }
@@ -277,21 +283,13 @@ export async function invoicingRoutes(app: FastifyInstance) {
     }
 
     try {
-      // Načtení minimálních dat pro název souboru
-      const rows = await sql`
-        SELECT year, number, series, C.id AS company_id
-        FROM provider.invoice AS I
-        LEFT JOIN provider.company AS C ON I.company_key = C.company_key
-        WHERE I.invoice_key = ${id}
-      `
-      if (rows.length === 0) return reply.code(404).send({ error: 'Faktura nenalezena' })
+      const data = await loadInvoiceData(sql, id)
+      if (!data) return reply.code(404).send({ error: 'Faktura nenalezena' })
 
-      const inv = rows[0]
-      const token = ((request as any).headers.authorization as string ?? '').replace('Bearer ', '')
-      const pdfBuffer = await generateInvoicePdf(Number(id), token)
+      const pdfBuffer = await generateInvoicePdf(data)
 
-      const vs = `${inv.series}${String(inv.company_id ?? '').slice(-5)}${String(inv.number).padStart(4, '0')}`
-      const filename = `faktura_${inv.year}_${vs}.pdf`
+      const vs = `${data.series}${String(data.company_id ?? '').slice(-5)}${String(data.number).padStart(4, '0')}`
+      const filename = `faktura_${data.year}_${vs}.pdf`
 
       const transporter = process.env.SMTP_HOST
         ? nodemailer.createTransport({
@@ -668,19 +666,12 @@ export async function invoicingRoutes(app: FastifyInstance) {
     const { userDb, passwordDb } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     const { id } = request.params as { id: string }
-    const token = ((request as any).headers.authorization as string ?? '').replace('Bearer ', '')
     try {
-      const rows = await sql`
-        SELECT I.series, I.number, I.year, C.id AS company_id
-        FROM provider.invoice AS I
-        LEFT JOIN provider.company AS C ON I.company_key = C.company_key
-        WHERE I.invoice_key = ${id}
-      `
-      if (rows.length === 0) return reply.code(404).send({ error: 'Faktura nenalezena' })
-      const inv = rows[0]
-      const vs = `${inv.series}${String(inv.company_id ?? '').slice(-5)}${String(inv.number).padStart(4, '0')}`
-      const filename = `faktura_${inv.year}_${vs}.pdf`
-      const pdfBuffer = await generateInvoicePdf(Number(id), token)
+      const data = await loadInvoiceData(sql, id)
+      if (!data) return reply.code(404).send({ error: 'Faktura nenalezena' })
+      const vs = `${data.series}${String(data.company_id ?? '').slice(-5)}${String(data.number).padStart(4, '0')}`
+      const filename = `faktura_${data.year}_${vs}.pdf`
+      const pdfBuffer = await generateInvoicePdf(data)
       return reply
         .header('Content-Type', 'application/pdf')
         .header('Content-Disposition', `inline; filename="${filename}"`)
