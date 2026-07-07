@@ -20,7 +20,8 @@ const printer = new PdfPrinter(fonts)
 let LOGO_SVG = ''
 try {
   const here = dirname(fileURLToPath(import.meta.url))
-  LOGO_SVG = readFileSync(resolve(here, '../../ui/src/assets/tm_logo.svg'), 'utf8')
+  // Logo je v src/assets (deployuje se se serverovým src); ui/ na serveru není.
+  LOGO_SVG = readFileSync(resolve(here, '../assets/tm_logo.svg'), 'utf8')
 } catch {
   LOGO_SVG = ''
 }
@@ -28,7 +29,7 @@ try {
 // ── Konstanty dodavatele (1:1 z InvoicePrint.tsx) ────────────────────────────
 const SUP = {
   name: '1. Česká obchodní, s.r.o.',
-  street: 'Poptoční 340',
+  street: 'Potoční 340',
   cityzip: '592 14 Nové Veselí (CZ)',
   ico: '60743395',
   dic: 'CZ60743395',
