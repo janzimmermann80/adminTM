@@ -1,8 +1,6 @@
 import PdfPrinter from 'pdfmake'
 import vfsFonts from 'pdfmake/build/vfs_fonts.js'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
+import { TM_LOGO_SVG_B64 } from '../assets/tmLogo.js'
 
 // ── Fonty (Roboto z pdfmake vfs — plná diakritika, nic se neinstaluje) ───────
 const vfs = vfsFonts.pdfMake.vfs
@@ -17,11 +15,10 @@ const fonts = {
 const printer = new PdfPrinter(fonts)
 
 // ── Logo (SVG) ───────────────────────────────────────────────────────────────
+// Inline (base64) — nezávisí na cestě ani na tom, zda běží z src (tsx) nebo dist (node).
 let LOGO_SVG = ''
 try {
-  const here = dirname(fileURLToPath(import.meta.url))
-  // Logo je v src/assets (deployuje se se serverovým src); ui/ na serveru není.
-  LOGO_SVG = readFileSync(resolve(here, '../assets/tm_logo.svg'), 'utf8')
+  LOGO_SVG = Buffer.from(TM_LOGO_SVG_B64, 'base64').toString('utf8')
 } catch {
   LOGO_SVG = ''
 }
