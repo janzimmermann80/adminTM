@@ -275,7 +275,7 @@ export async function invoicingRoutes(app: FastifyInstance) {
   app.post('/:id/send-email', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userDb, passwordDb } = (request as any).user
+    const { userDb, passwordDb, initials, employeeSchema } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     const { id } = request.params as { id: string }
     const { to, cc, subject, body } = request.body as {
@@ -295,10 +295,11 @@ export async function invoicingRoutes(app: FastifyInstance) {
         ? nodemailer.createTransport({
             host: process.env.SMTP_HOST,
             port: Number(process.env.SMTP_PORT ?? 587),
-            secure: false,
+            secure: Number(process.env.SMTP_PORT ?? 587) === 465,
             auth: process.env.SMTP_USER
               ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
               : undefined,
+            tls: { rejectUnauthorized: false },
           })
         : nodemailer.createTransport({
             sendmail: true,
@@ -306,19 +307,50 @@ export async function invoicingRoutes(app: FastifyInstance) {
             path: process.env.SENDMAIL_PATH ?? '/usr/sbin/sendmail',
           })
 
+      // Explicitní envelope s čistými adresami — sendmail dostane `-f info@truckmanager.eu`
+      // a příjemce bez display-name/diakritiky (jinak postfix vrací EX_CONFIG / exit 78).
+      const FROM_EMAIL = 'info@truckmanager.eu'
+      const parseAddrs = (v?: string): string[] =>
+        (v ?? '')
+          .split(/[,;]+/)
+          .map(s => s.trim())
+          .filter(Boolean)
+          .map(s => {
+            const m = s.match(/<([^>]+)>/)
+            return (m ? m[1] : s).trim()
+          })
+      const toList = parseAddrs(to)
+      const ccList = parseAddrs(cc)
+
+      // Reply-To = e-mail přihlášeného obchodníka (odpovědi jdou konkrétní osobě,
+      // odesílatel/auth zůstává firemní info@truckmanager.eu).
+      let replyTo: string | undefined
+      try {
+        const schema = employeeSchema || 'provider'
+        const [emp] = await sql`
+          SELECT email FROM ${sql(schema + '.employee_account')}
+          WHERE initials = ${initials}
+        `
+        if (emp?.email && String(emp.email).includes('@')) replyTo = String(emp.email).trim()
+      } catch { /* Reply-To je volitelný — při chybě se prostě nepoužije */ }
+
       await transporter.sendMail({
-        from: '"1. Česká obchodní, s.r.o." <info@truckmanager.eu>',
+        from: `"1. Česká obchodní, s.r.o." <${FROM_EMAIL}>`,
         to,
         cc: cc || undefined,
+        replyTo,
         subject,
         html: body.replace(/\n/g, '<br>'),
         text: body,
         attachments: [{ filename, content: pdfBuffer, contentType: 'application/pdf' }],
+        envelope: { from: FROM_EMAIL, to: [...toList, ...ccList] },
       })
 
       return reply.send({ ok: true })
     } catch (err: any) {
-      request.log.error({ err }, 'send-email failed')
+      request.log.error({
+        msg: err?.message, code: err?.code, response: err?.response, stderr: err?.stderr,
+      }, 'send-email failed')
       return reply.code(500).send({ error: err.message })
     } finally {
       await sql.end()
