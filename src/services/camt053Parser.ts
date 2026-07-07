@@ -34,6 +34,7 @@ const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: '@_',
   removeNSPrefix: true,
+  parseTagValue: false,
   isArray: (tagName) => ['Ntry', 'Bal', 'TxDtls'].includes(tagName),
 })
 
@@ -79,7 +80,7 @@ export function parseCamt053(xmlContent: string): ParsedStatement {
     const ccy = typeof amt === 'object' ? (amt['@_Ccy'] ?? 'CZK') : 'CZK'
     const sign = bal['CdtDbtInd'] === 'DBIT' ? -1 : 1
     currency = ccy
-    if (cd === 'OPBD') openingBalance = amtVal * sign
+    if (cd === 'OPBD' || cd === 'PRCD') openingBalance = amtVal * sign
     if (cd === 'CLBD') closingBalance = amtVal * sign
   }
 

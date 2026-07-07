@@ -339,9 +339,10 @@ async function autoMatchInvoices(pgSql: any, statementId: number) {
 
   for (const tx of transactions) {
     const [inv] = await pgSql`
-      SELECT invoice_key FROM provider.invoice
-      WHERE (series::text || RIGHT(id::text, 5) || LPAD(number::text, 4, '0')) = ${tx.vs}
-        AND cancellation IS NULL AND settlement IS NULL
+      SELECT I.invoice_key FROM provider.invoice I
+      JOIN provider.company C ON I.company_key = C.company_key
+      WHERE (I.series::text || RIGHT(C.id::text, 5) || LPAD(I.number::text, 4, '0')) = ${tx.vs}
+        AND I.cancellation IS NULL
       LIMIT 1
     `
     if (inv) {
