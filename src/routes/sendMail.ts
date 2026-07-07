@@ -142,7 +142,7 @@ export async function sendMailRoutes(app: FastifyInstance) {
   app.post('/send', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userDb, passwordDb, initials, employeeSchema } = (request as any).user
+    const { userDb, passwordDb, initials, employeeSchema, smtpUser, smtpPass } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     const schema = employeeSchema || 'provider'
     const body = request.body as {
@@ -160,20 +160,15 @@ export async function sendMailRoutes(app: FastifyInstance) {
     const senderInfo = SENDERS[body.sender] ?? SENDERS.D
 
     try {
-      const transport = process.env.SMTP_HOST
-        ? nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
-            port: Number(process.env.SMTP_PORT ?? 587),
-            secure: false,
-            auth: process.env.SMTP_USER
-              ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-              : undefined,
-          })
-        : nodemailer.createTransport({
-            sendmail: true,
-            newline: 'unix',
-            path: process.env.SENDMAIL_PATH ?? '/usr/sbin/sendmail',
-          })
+      // SMTP auth = přihlašovací údaje přihlášeného uživatele (SSO euro-sped).
+      // Relay nweb.euro-sped.cz:25, ignoreTLS (interní server, žádný STARTTLS).
+      const transport = nodemailer.createTransport({
+        host: process.env.SMTP_HOST ?? 'nweb.euro-sped.cz',
+        port: Number(process.env.SMTP_PORT ?? 25),
+        secure: false,
+        ignoreTLS: true,
+        auth: smtpUser ? { user: smtpUser, pass: smtpPass } : undefined,
+      })
 
       const msgHtml = body.message.replace(/\n/g, '<br>').replace(/<s>/g, '&nbsp;')
 

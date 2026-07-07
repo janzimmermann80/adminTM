@@ -275,7 +275,7 @@ export async function invoicingRoutes(app: FastifyInstance) {
   app.post('/:id/send-email', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userDb, passwordDb, initials, employeeSchema } = (request as any).user
+    const { userDb, passwordDb, initials, employeeSchema, smtpUser, smtpPass } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     const { id } = request.params as { id: string }
     const { to, cc, subject, body } = request.body as {
@@ -291,24 +291,17 @@ export async function invoicingRoutes(app: FastifyInstance) {
       const vs = `${data.series}${String(data.company_id ?? '').slice(-5)}${String(data.number).padStart(4, '0')}`
       const filename = `faktura_${data.year}_${vs}.pdf`
 
-      const transporter = process.env.SMTP_HOST
-        ? nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
-            port: Number(process.env.SMTP_PORT ?? 587),
-            secure: Number(process.env.SMTP_PORT ?? 587) === 465,
-            auth: process.env.SMTP_USER
-              ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
-              : undefined,
-            tls: { rejectUnauthorized: false },
-          })
-        : nodemailer.createTransport({
-            sendmail: true,
-            newline: 'unix',
-            path: process.env.SENDMAIL_PATH ?? '/usr/sbin/sendmail',
-          })
+      // SMTP auth = přihlašovací údaje přihlášeného uživatele (SSO euro-sped).
+      // Relay nweb.euro-sped.cz:25, ignoreTLS (interní server, žádný STARTTLS).
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST ?? 'nweb.euro-sped.cz',
+        port: Number(process.env.SMTP_PORT ?? 25),
+        secure: false,
+        ignoreTLS: true,
+        auth: smtpUser ? { user: smtpUser, pass: smtpPass } : undefined,
+      })
 
-      // Explicitní envelope s čistými adresami — sendmail dostane `-f info@truckmanager.eu`
-      // a příjemce bez display-name/diakritiky (jinak postfix vrací EX_CONFIG / exit 78).
+      // Explicitní envelope s čistými adresami — rozparsovaní příjemci bez display-name.
       const FROM_EMAIL = 'info@truckmanager.eu'
       const parseAddrs = (v?: string): string[] =>
         (v ?? '')
@@ -341,7 +334,6 @@ export async function invoicingRoutes(app: FastifyInstance) {
         replyTo,
         subject,
         html: body.replace(/\n/g, '<br>'),
-        text: body,
         attachments: [{ filename, content: pdfBuffer, contentType: 'application/pdf' }],
         envelope: { from: FROM_EMAIL, to: [...toList, ...ccList] },
       })

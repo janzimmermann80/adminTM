@@ -43,6 +43,9 @@ export async function authRoutes(app: FastifyInstance) {
       employeeSchema: row.employee_schema ?? '',
       provider: row.provider ?? '',
       region: row.ui_lang ?? '',
+      // SMTP auth = přihlašovací údaje uživatele (SSO euro-sped: stejné creds pro DB i mail)
+      smtpUser: username,
+      smtpPass: password,
     }
 
     const token = (app as any).jwt.sign(payload, { expiresIn: '12h' })

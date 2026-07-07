@@ -23,4 +23,6 @@ export interface JwtPayload {
   employeeSchema: string
   provider: string
   region: string
+  smtpUser: string
+  smtpPass: string
 }
