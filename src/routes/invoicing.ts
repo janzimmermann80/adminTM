@@ -134,7 +134,7 @@ async function loadInvoiceData(sql: any, id: string | number): Promise<any | nul
   const qrVs = `${inv0.series}${String(inv0.company_id ?? '').slice(-5)}${String(inv0.number).padStart(4, '0')}`
   const qrAmt = Number(inv0.curr_total ?? inv0.total ?? 0).toFixed(2)
   const qrCcy = String(inv0.currency ?? 'CZK')
-  const ibanRaw = qrCcy === 'EUR' ? 'CZ7703000000000349438195' : 'CZ2703000000000226164811'
+  const ibanRaw = qrCcy === 'EUR' ? 'CZ7703000000000349438195' : 'CZ2703000000000226154811'
   const qrStr = `SPD*1.0*ACC:${ibanRaw}*AM:${qrAmt}*CC:${qrCcy}*X-VS:${qrVs}`
   const qr_data_url = await QRCode.toDataURL(qrStr, { width: 160, margin: 1, color: { dark: '#000000', light: '#ffffff' } }).catch(() => '')
   return { ...inv0, items, qr_data_url }

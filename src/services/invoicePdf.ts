@@ -32,7 +32,7 @@ const SUP = {
   dic: 'CZ60743395',
   phone: '+420 737 288 091',
   email: 'info@truckmanager.eu',
-  account: '226164811/0300',
+  account: '226154811/0300',
   iban: 'CZ27 0300 0000 0002 2615 4811',
   swift: 'CEKOCZPP',
 }
