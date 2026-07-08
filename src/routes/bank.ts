@@ -116,7 +116,11 @@ export async function bankRoutes(app: FastifyInstance) {
       const rows = db.prepare(`
         SELECT s.*,
                COUNT(t.id) AS tx_count,
-               COUNT(t.matched_invoice_id) AS matched_count
+               COUNT(t.matched_invoice_id) AS matched_count,
+               COALESCE(SUM(CASE WHEN t.credit_debit = 'CRDT' THEN t.amount ELSE 0 END), 0) AS incoming_total,
+               COALESCE(SUM(CASE WHEN t.credit_debit = 'DBIT' THEN t.amount ELSE 0 END), 0) AS outgoing_total,
+               COALESCE(SUM(CASE WHEN t.credit_debit = 'CRDT' AND SUBSTR(t.vs, 1, 1) = '5' THEN t.amount ELSE 0 END), 0) AS incoming_proforma,
+               COALESCE(SUM(CASE WHEN t.credit_debit = 'CRDT' AND SUBSTR(t.vs, 1, 1) != '5' THEN t.amount ELSE 0 END), 0) AS incoming_service
         FROM bank_statements s
         LEFT JOIN bank_transactions t ON t.statement_id = s.id
         GROUP BY s.id
@@ -152,7 +156,7 @@ export async function bankRoutes(app: FastifyInstance) {
       let invoiceMap: Record<number, any> = {}
       if (matchedIds.length > 0) {
         const invoices = await pgSql`
-          SELECT i.invoice_key, i.number, i.year, i.total, c.company
+          SELECT i.invoice_key, i.number, i.year, i.total, i.settlement, i.company_key, c.company
           FROM provider.invoice i
           LEFT JOIN provider.company c ON i.company_key = c.company_key
           WHERE i.invoice_key = ANY(${matchedIds})
@@ -160,12 +164,28 @@ export async function bankRoutes(app: FastifyInstance) {
         for (const inv of invoices) invoiceMap[inv.invoice_key] = inv
       }
 
+      const matchedCompanyKeys = transactions.filter(t => t.matched_company_key).map(t => t.matched_company_key)
+      let companyMap: Record<number, any> = {}
+      if (matchedCompanyKeys.length > 0) {
+        const companies = await pgSql`
+          SELECT company_key, company FROM provider.company
+          WHERE company_key = ANY(${matchedCompanyKeys})
+        `
+        for (const co of companies) companyMap[co.company_key] = co
+      }
+
+      const proformaCompanyMap = await resolveProformaCompanyKeys(pgSql, transactions)
+
       const txWithInvoice = transactions.map(t => ({
         ...t,
         invoice_number:  invoiceMap[t.matched_invoice_id]?.number ?? null,
         invoice_year:    invoiceMap[t.matched_invoice_id]?.year ?? null,
         invoice_total:   invoiceMap[t.matched_invoice_id]?.total ?? null,
-        invoice_company: invoiceMap[t.matched_invoice_id]?.company ?? null,
+        invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
+        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+        vs_company_key: (String(t.vs ?? '').charAt(0) === '5' ? proformaCompanyMap[t.vs] : null)
+          ?? invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
       }))
 
       return reply.send({ ...stmt, transactions: txWithInvoice })
@@ -193,6 +213,7 @@ export async function bankRoutes(app: FastifyInstance) {
     const { userDb, passwordDb } = (request as any).user
     const pgSql = getUserSql(userDb, passwordDb)
     const q = request.query as {
+      statement_id?: string
       unmatched?: string
       credit_debit?: string
       date_from?: string
@@ -201,7 +222,7 @@ export async function bankRoutes(app: FastifyInstance) {
       limit?: string
       offset?: string
     }
-    const limit = Math.min(Number(q.limit ?? 50), 200)
+    const limit = Math.min(Number(q.limit ?? 50), 1000)
     const offset = Number(q.offset ?? 0)
 
     try {
@@ -212,6 +233,7 @@ export async function bankRoutes(app: FastifyInstance) {
         WHERE 1=1
       `
       const params: any[] = []
+      if (q.statement_id)  { sql += ' AND t.statement_id = ?'; params.push(Number(q.statement_id)) }
       if (q.unmatched === 'true') { sql += ' AND t.matched_invoice_id IS NULL' }
       if (q.credit_debit) { sql += ' AND t.credit_debit = ?'; params.push(q.credit_debit) }
       if (q.date_from)    { sql += ' AND t.transaction_date >= ?'; params.push(q.date_from) }
@@ -229,7 +251,7 @@ export async function bankRoutes(app: FastifyInstance) {
       let invoiceMap: Record<number, any> = {}
       if (matchedIds.length > 0) {
         const invoices = await pgSql`
-          SELECT i.invoice_key, i.number, i.year, i.total, c.company
+          SELECT i.invoice_key, i.number, i.year, i.total, i.settlement, i.company_key, c.company
           FROM provider.invoice i
           LEFT JOIN provider.company c ON i.company_key = c.company_key
           WHERE i.invoice_key = ANY(${matchedIds})
@@ -237,12 +259,28 @@ export async function bankRoutes(app: FastifyInstance) {
         for (const inv of invoices) invoiceMap[inv.invoice_key] = inv
       }
 
+      const matchedCompanyKeys = transactions.filter(t => t.matched_company_key).map(t => t.matched_company_key)
+      let companyMap: Record<number, any> = {}
+      if (matchedCompanyKeys.length > 0) {
+        const companies = await pgSql`
+          SELECT company_key, company FROM provider.company
+          WHERE company_key = ANY(${matchedCompanyKeys})
+        `
+        for (const co of companies) companyMap[co.company_key] = co
+      }
+
+      const proformaCompanyMap = await resolveProformaCompanyKeys(pgSql, transactions)
+
       const result = transactions.map(t => ({
         ...t,
         invoice_number:  invoiceMap[t.matched_invoice_id]?.number ?? null,
         invoice_year:    invoiceMap[t.matched_invoice_id]?.year ?? null,
         invoice_total:   invoiceMap[t.matched_invoice_id]?.total ?? null,
-        invoice_company: invoiceMap[t.matched_invoice_id]?.company ?? null,
+        invoice_company:     invoiceMap[t.matched_invoice_id]?.company ?? companyMap[t.matched_company_key]?.company ?? null,
+        invoice_company_key: invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
+        vs_company_key: (String(t.vs ?? '').charAt(0) === '5' ? proformaCompanyMap[t.vs] : null)
+          ?? invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
       }))
 
       return reply.send(result)
@@ -260,19 +298,33 @@ export async function bankRoutes(app: FastifyInstance) {
     const { userDb, passwordDb } = (request as any).user
     const pgSql = getUserSql(userDb, passwordDb)
     const { id } = request.params as { id: string }
-    const { invoice_key } = request.body as { invoice_key: number }
+    const body = request.body as { invoice_key?: number; company_key?: number }
 
     try {
-      const [inv] = await pgSql`
-        SELECT invoice_key FROM provider.invoice WHERE invoice_key = ${invoice_key}
-      `
-      if (!inv) return reply.status(404).send({ error: 'Faktura nenalezena' })
+      if (body.company_key != null) {
+        // Proforma záloha — ulož company_key do matched_company_key
+        const [co] = await pgSql`
+          SELECT company_key FROM provider.company WHERE company_key = ${body.company_key}
+        `
+        if (!co) return reply.status(404).send({ error: 'Firma nenalezena' })
+        db.prepare(`
+          UPDATE bank_transactions
+          SET matched_company_key = ?, matched_invoice_id = NULL, matched_at = datetime('now')
+          WHERE id = ?
+        `).run(body.company_key, Number(id))
+      } else {
+        const invoice_key = body.invoice_key!
+        const [inv] = await pgSql`
+          SELECT invoice_key FROM provider.invoice WHERE invoice_key = ${invoice_key}
+        `
+        if (!inv) return reply.status(404).send({ error: 'Faktura nenalezena' })
 
-      db.prepare(`
-        UPDATE bank_transactions
-        SET matched_invoice_id = ?, matched_at = datetime('now')
-        WHERE id = ?
-      `).run(invoice_key, Number(id))
+        db.prepare(`
+          UPDATE bank_transactions
+          SET matched_invoice_id = ?, matched_company_key = NULL, matched_at = datetime('now')
+          WHERE id = ?
+        `).run(invoice_key, Number(id))
+      }
 
       const updated = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(Number(id))
       return reply.send(updated)
@@ -291,7 +343,7 @@ export async function bankRoutes(app: FastifyInstance) {
     try {
       db.prepare(`
         UPDATE bank_transactions
-        SET matched_invoice_id = NULL, matched_at = NULL
+        SET matched_invoice_id = NULL, matched_company_key = NULL, matched_at = NULL
         WHERE id = ?
       `).run(Number(id))
       const updated = db.prepare('SELECT * FROM bank_transactions WHERE id = ?').get(Number(id))
@@ -307,20 +359,54 @@ export async function bankRoutes(app: FastifyInstance) {
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { userDb, passwordDb } = (request as any).user
     const pgSql = getUserSql(userDb, passwordDb)
-    const q = request.query as { q?: string; amount?: string }
+    const q = request.query as { q?: string; amount?: string; series?: string; proforma?: string }
 
     try {
-      const rows = await pgSql`
-        SELECT i.invoice_key, i.number, i.year, i.total, i.currency,
-               i.issued, i.maturity, i.settlement, c.company
-        FROM provider.invoice i
-        LEFT JOIN provider.company c ON i.company_key = c.company_key
-        WHERE i.cancellation IS NULL
-          ${q.q ? pgSql`AND (i.number::text ILIKE ${'%' + q.q + '%'} OR c.company ILIKE ${'%' + q.q + '%'})` : pgSql``}
-          ${q.amount ? pgSql`AND ABS(i.total - ${Number(q.amount)}) < 0.01` : pgSql``}
-        ORDER BY i.issued DESC
-        LIMIT 20
-      `
+      let rows: any[]
+
+      if (q.proforma === 'true') {
+        // Zálohové (proforma) faktury — hledáme v demo.proforma_invoice.
+        // invoice_key aliasujeme na company_key, protože proforma se páruje na firmu.
+        const searchTerm = (q.q ?? '').trim()
+        if (/^5\d{7,}$/.test(searchTerm)) {
+          // Plný proforma VS: '5' + series(1) + company.id_pravých5 + číslo
+          const series = Number(searchTerm[1])
+          const companyIdSuffix = searchTerm.slice(2, 7)
+          const number = Number(searchTerm.slice(7))
+          rows = await pgSql`
+            SELECT p.company_key AS invoice_key, p.*, c.company, c.id AS company_id
+            FROM demo.proforma_invoice p
+            LEFT JOIN provider.company c ON p.company_key = c.company_key
+            WHERE p.series = ${series}
+              AND RIGHT(c.id::text, 5) = ${companyIdSuffix}
+              AND p.number = ${number}
+            ORDER BY p.issued DESC
+            LIMIT 20
+          `
+        } else {
+          rows = await pgSql`
+            SELECT p.company_key AS invoice_key, p.*, c.company, c.id AS company_id
+            FROM demo.proforma_invoice p
+            LEFT JOIN provider.company c ON p.company_key = c.company_key
+            ${searchTerm ? pgSql`WHERE (p.number::text ILIKE ${'%' + searchTerm + '%'} OR c.company ILIKE ${'%' + searchTerm + '%'})` : pgSql``}
+            ORDER BY p.issued DESC
+            LIMIT 20
+          `
+        }
+      } else {
+        rows = await pgSql`
+          SELECT i.invoice_key, i.number, i.year, i.total, i.currency,
+                 i.issued, i.maturity, i.settlement, c.company
+          FROM provider.invoice i
+          LEFT JOIN provider.company c ON i.company_key = c.company_key
+          WHERE i.cancellation IS NULL
+            ${q.series ? pgSql`AND i.series = ${Number(q.series)}` : pgSql`AND i.series != 5`}
+            ${q.q ? pgSql`AND (i.number::text ILIKE ${'%' + q.q + '%'} OR c.company ILIKE ${'%' + q.q + '%'})` : pgSql``}
+            ${q.amount ? pgSql`AND ABS(i.total - ${Number(q.amount)}) < 0.01` : pgSql``}
+          ORDER BY i.issued DESC
+          LIMIT 20
+        `
+      }
       return reply.send(rows)
     } catch (err: any) {
       return reply.status(500).send({ error: err.message })
@@ -330,19 +416,49 @@ export async function bankRoutes(app: FastifyInstance) {
   })
 }
 
+// VS kóduje firmu: zálohová (proforma) platba má VS ve tvaru '5'+série+ID5+číslo.
+// Firmu dohledáme přes tabulku záloh (přesně dle série + ID firmy + čísla).
+async function resolveProformaCompanyKeys(pgSql: any, transactions: any[]): Promise<Record<string, number>> {
+  const map: Record<string, number> = {}
+  const proformaVs = [...new Set(
+    transactions.filter(t => t.vs && String(t.vs).charAt(0) === '5').map(t => String(t.vs))
+  )]
+  for (const vs of proformaVs) {
+    if (!/^5\d{7,}$/.test(vs)) continue
+    const series = Number(vs[1])
+    const company5 = vs.slice(2, 7)
+    const number = Number(vs.slice(7))
+    const [row] = await pgSql`
+      SELECT p.company_key FROM demo.proforma_invoice p
+      JOIN provider.company c ON c.company_key = p.company_key
+      WHERE p.series = ${series} AND RIGHT(c.id::text, 5) = ${company5} AND p.number = ${number}
+      LIMIT 1
+    `
+    if (row) map[vs] = Number(row.company_key)
+  }
+  return map
+}
+
 async function autoMatchInvoices(pgSql: any, statementId: number) {
   const transactions = db.prepare(`
-    SELECT id, vs FROM bank_transactions
+    SELECT id, vs, transaction_date FROM bank_transactions
     WHERE statement_id = ? AND matched_invoice_id IS NULL
       AND vs IS NOT NULL AND vs != '' AND credit_debit = 'CRDT'
+      AND SUBSTR(vs, 1, 1) != '5'
   `).all(statementId) as any[]
 
   for (const tx of transactions) {
+    // VS neobsahuje rok — stejné pořadové číslo se opakuje napříč roky.
+    // Preferujeme neuhrazenou fakturu a pak ročník nejbližší datu platby.
+    const txYear = tx.transaction_date ? Number(String(tx.transaction_date).slice(0, 4)) : null
     const [inv] = await pgSql`
       SELECT I.invoice_key FROM provider.invoice I
       JOIN provider.company C ON I.company_key = C.company_key
       WHERE (I.series::text || RIGHT(C.id::text, 5) || LPAD(I.number::text, 4, '0')) = ${tx.vs}
         AND I.cancellation IS NULL
+      ORDER BY (I.settlement IS NULL) DESC,
+               ${txYear ? pgSql`ABS(I.year - ${txYear})` : pgSql`0`} ASC,
+               I.year DESC
       LIMIT 1
     `
     if (inv) {

@@ -35,7 +35,7 @@ const parser = new XMLParser({
   attributeNamePrefix: '@_',
   removeNSPrefix: true,
   parseTagValue: false,
-  isArray: (tagName) => ['Ntry', 'Bal', 'TxDtls'].includes(tagName),
+  isArray: (tagName) => ['Ntry', 'Bal', 'TxDtls', 'Strd'].includes(tagName),
 })
 
 /** Rekurzivně najde první hodnotu klíče v objektu */
@@ -133,19 +133,22 @@ function parseEntry(ntry: any, defaultCurrency: string): ParsedTransaction {
     : rltdPties['CdtrAcct']?.['Id']
   const counterpartyIban: string = counterpartyAcct?.['IBAN'] ?? counterpartyAcct?.['Othr']?.['Id'] ?? ''
 
-  // Variabilní symbol, KS, SS
+  // Variabilní a jiné symboly — ČSOB dává VS/KS/SS ve strukturovaných Strd[] blocích s prefixem "VS:", "KS:", "SS:"
   const refs = tx['Refs'] ?? {}
   const addtlInfo: string = (tx['AddtlTxInf'] ?? ntry['AddtlNtryInf'] ?? '').toString()
   const rmtInf = tx['RmtInf'] ?? {}
-  const rmtUstrd: string = (Array.isArray(rmtInf['Ustrd']) ? rmtInf['Ustrd'][0] : rmtInf['Ustrd']) ?? ''
-  const rmtStrd = rmtInf['Strd'] ?? {}
-  const strdRef: string = rmtStrd['CdtrRefInf']?.['Ref'] ?? ''
+  const rmtUstrdRaw = Array.isArray(rmtInf['Ustrd']) ? rmtInf['Ustrd'][0] : rmtInf['Ustrd']
+  const rmtUstrd: string = rmtUstrdRaw != null ? String(rmtUstrdRaw) : ''
 
-  const vs = extractVs(refs, addtlInfo, strdRef, rmtUstrd)
-  const ks = extractSymbol('KS', addtlInfo)
-  const ss = extractSymbol('SS', addtlInfo)
+  // Strd může být pole — každý symbol (VS, KS, SS) je ve vlastním elementu s prefixem
+  const strdList: any[] = Array.isArray(rmtInf['Strd']) ? rmtInf['Strd'] : (rmtInf['Strd'] ? [rmtInf['Strd']] : [])
+  const strdRefs: string[] = strdList.map((s: any) => String(s['CdtrRefInf']?.['Ref'] ?? ''))
 
-  const remittanceInfo: string = rmtUstrd || addtlInfo || strdRef
+  const vs = extractVs(refs, addtlInfo, strdRefs, rmtUstrd)
+  const ks = strdRefs.map(r => extractSymbol('KS', r)).find(v => v) || extractSymbol('KS', addtlInfo)
+  const ss = strdRefs.map(r => extractSymbol('SS', r)).find(v => v) || extractSymbol('SS', addtlInfo)
+
+  const remittanceInfo: string = rmtUstrd || addtlInfo || strdRefs.join(' ')
 
   return {
     entryRef,
@@ -163,13 +166,23 @@ function parseEntry(ntry: any, defaultCurrency: string): ParsedTransaction {
   }
 }
 
-function extractVs(refs: any, addtlInfo: string, strdRef: string, rmtUstrd: string): string {
-  // 1. Structured remittance reference
-  if (strdRef && /^\d+$/.test(strdRef.trim())) return strdRef.trim()
+function extractVs(refs: any, addtlInfo: string, strdRefs: string[], rmtUstrd: string): string {
+  // 1. Structured remittance refs — nový formát ČSOB: "VS:12345", starý: jen číslo
+  for (const ref of strdRefs) {
+    const fromRef = extractSymbol('VS', ref)
+    if (fromRef) return fromRef
+    if (/^\d+$/.test(ref.trim())) return ref.trim()
+  }
 
-  // 2. EndToEndId (může být ve formátu /VS/KS/SS nebo jen číslo)
-  const e2e: string = refs['EndToEndId'] ?? ''
+  // 2. EndToEndId (může být objekt/pole nebo ve formátu /VS/KS/SS)
+  const e2eRaw = refs['EndToEndId']
+  const e2e: string = e2eRaw == null ? '' : (typeof e2eRaw === 'object' ? String(Array.isArray(e2eRaw) ? e2eRaw[0] ?? '' : '') : String(e2eRaw))
   if (e2e && e2e !== 'NOTPROVIDED') {
+    const vsFromE2e = extractSymbol('VS', e2e)
+    if (vsFromE2e) return vsFromE2e
+    // Formát bez oddělovače: ?/VS5408192111/SS/KS nebo /VS12345/
+    const vsNoSep = /(?:^|[/?])VS(\d{1,10})(?:\/|$)/i.exec(e2e)
+    if (vsNoSep) return vsNoSep[1]
     const vsMatch = e2e.match(/(?:^|\/)(\d{1,10})(?:\/|$)/)
     if (vsMatch) return vsMatch[1]
     if (/^\d{1,10}$/.test(e2e.trim())) return e2e.trim()

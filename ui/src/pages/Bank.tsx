@@ -9,7 +9,7 @@ import {
 } from '../api'
 import { InvoiceFormModal } from '../components/InvoiceFormModal'
 import { InvoiceEmailModal } from './company/TabInvoices'
-import { CompanyDetailPanel } from './company/CompanyDetailPanel'
+import { CompanyDetailModal } from '../components/CompanyDetailModal'
 
 // ── Invoice search modal ──────────────────────────────────────────────────────
 function InvoiceSearchModal({ tx, onClose, onMatched, onProformaSaved }: {
@@ -177,12 +177,13 @@ function InvoiceSearchModal({ tx, onClose, onMatched, onProformaSaved }: {
 }
 
 // ── Statements accordion ─────────────────────────────────────────────────────
-function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onCreateInvoice }: {
+function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onOpenInvoice, onCreateInvoice }: {
   tx: any
   onUnmatch: (id: number) => void
   onMatch: (tx: any) => void
   onSettle: (tx: any) => void
   onOpenCompany: (companyKey: number) => void
+  onOpenInvoice: (invoiceKey: number) => void
   onCreateInvoice: (tx: any) => void
 }) {
   const isCredit = tx.credit_debit === 'CRDT'
@@ -212,13 +213,31 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onCreat
       </td>
       <td className="px-4 py-2.5 text-xs">
         {effectivelyMatched ? (
-          <button className="text-left hover:opacity-75 transition-opacity" onClick={() => companyKey && onOpenCompany(companyKey)}>
-            {!isProforma && <div className="font-medium text-teal-700">{tx.invoice_year}/{tx.invoice_number}</div>}
-            {isProforma && <div className="font-medium text-purple-700">Záloha</div>}
-            <div className="text-gray-500 truncate max-w-[120px]">{companyName}</div>
-          </button>
+          <div className="text-left">
+            {!isProforma && (
+              <button onClick={() => tx.matched_invoice_id && onOpenInvoice(tx.matched_invoice_id)}
+                className="font-medium text-teal-700 hover:underline" title="Detail faktury">
+                {tx.invoice_year}/{tx.invoice_number}
+              </button>
+            )}
+            {isProforma && (
+              <button onClick={() => companyKey && onOpenCompany(companyKey)}
+                className="font-medium text-purple-700 hover:underline">Záloha</button>
+            )}
+            <button onClick={() => companyKey && onOpenCompany(companyKey)}
+              disabled={!companyKey}
+              className="flex items-center gap-1 text-teal-600 hover:text-teal-800 hover:underline truncate max-w-[160px] text-left disabled:text-gray-500 disabled:no-underline disabled:cursor-default"
+              title={companyKey ? 'Detail firmy' : undefined}>
+              {companyKey && (
+                <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5"/>
+                </svg>
+              )}
+              <span className="truncate">{companyName}</span>
+            </button>
+          </div>
         ) : (
-          <span className="text-amber-600 font-medium">{isProforma ? 'Záloha — nenalezena' : 'Nespárováno'}</span>
+          <span className="text-amber-600 font-medium">{isProforma ? 'Záloha — nespárováno' : 'Nespárováno'}</span>
         )}
       </td>
       <td className="px-4 py-2.5 text-xs whitespace-nowrap">
@@ -226,10 +245,8 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onCreat
           tx.invoice_settlement
             ? <span className="text-green-600 font-medium">{formatDate(tx.invoice_settlement)}</span>
             : <button onClick={() => onSettle(tx)} title="Zaplatit — vložit datum platby"
-                className="inline-flex items-center gap-1 text-gray-400 hover:text-teal-600 transition-colors">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
+                className="text-xs border border-teal-600 text-teal-700 hover:bg-teal-50 px-2 py-0.5 rounded-lg transition-colors">
+                Zaplatit
               </button>
         )}
         {isProforma && issuedInv && (
@@ -257,11 +274,12 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onCreat
   )
 }
 
-function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onCreateInvoice, openNewest, onNewestOpened }: {
+function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onOpenInvoice, onCreateInvoice, openNewest, onNewestOpened }: {
   onDeleted: () => void
   onMatch: (tx: any) => void
   onUnmatch: (id: number) => void
   onOpenCompany: (companyKey: number) => void
+  onOpenInvoice: (invoiceKey: number) => void
   onCreateInvoice: (tx: any) => void
   openNewest?: boolean
   onNewestOpened?: () => void
@@ -359,6 +377,17 @@ function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onC
               {s.period_from && <span className="text-gray-500 shrink-0">{formatDate(s.period_from)}{s.period_to && s.period_to !== s.period_from ? ` – ${formatDate(s.period_to)}` : ''}</span>}
               {s.opening_balance != null && <span className="text-gray-500 shrink-0">Počáteční: <span className="font-medium text-gray-700">{formatNumber(s.opening_balance)} {s.currency}</span></span>}
               {s.closing_balance != null && <span className="text-gray-500 shrink-0">Konečný: <span className="font-medium text-gray-700">{formatNumber(s.closing_balance)} {s.currency}</span></span>}
+              {s.incoming_total != null && (
+                <span className="text-gray-500 shrink-0">
+                  Příchozí: <span className="font-medium text-green-600">{formatNumber(s.incoming_total)} {s.currency}</span>
+                  {(s.incoming_proforma > 0 || s.incoming_service > 0) && (
+                    <span className="text-xs text-gray-400"> (služby <span className="font-medium text-gray-600">{formatNumber(s.incoming_service)}</span> · zálohy <span className="font-medium text-gray-600">{formatNumber(s.incoming_proforma)}</span>)</span>
+                  )}
+                </span>
+              )}
+              {s.outgoing_total != null && s.outgoing_total > 0 && (
+                <span className="text-gray-500 shrink-0">Odchozí: <span className="font-medium text-red-600">{formatNumber(s.outgoing_total)} {s.currency}</span></span>
+              )}
               <span className="text-xs text-gray-400 shrink-0">{s.tx_count} transakcí · {s.matched_count} spárováno</span>
             </div>
             <div className="flex items-center gap-3 ml-3 shrink-0">
@@ -399,6 +428,7 @@ function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onC
                         onUnmatch={async (id) => { await onUnmatch(id); refreshTx(s.id) }}
                         onMatch={(tx) => { onMatch(tx) }}
                         onOpenCompany={onOpenCompany}
+                        onOpenInvoice={onOpenInvoice}
                         onCreateInvoice={onCreateInvoice}
                         onSettle={async (tx) => {
                           try {
@@ -436,6 +466,7 @@ export const Bank = () => {
   const [matchTarget, setMatchTarget] = useState<any | null>(null)
   const [statementsKey, setStatementsKey] = useState(0)
   const [companyPanelKey, setCompanyPanelKey] = useState<number | null>(null)
+  const [invoiceDetailKey, setInvoiceDetailKey] = useState<number | null>(null)
   const [invoiceFormTarget, setInvoiceFormTarget] = useState<{ companyKey: number; prefill: any; proformaData?: any } | null>(null)
   const [emailTarget, setEmailTarget] = useState<{ inv: any; companyId: string; companyKey: string } | null>(null)
 
@@ -588,6 +619,7 @@ export const Bank = () => {
         onMatch={tx => setMatchTarget(tx)}
         onUnmatch={handleUnmatch}
         onOpenCompany={key => setCompanyPanelKey(key)}
+        onOpenInvoice={key => setInvoiceDetailKey(key)}
         onCreateInvoice={handleCreateInvoice}
         openNewest={openNewest}
         onNewestOpened={() => setOpenNewest(false)}
@@ -624,15 +656,19 @@ export const Bank = () => {
       )}
 
       {companyPanelKey && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setCompanyPanelKey(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <CompanyDetailPanel
-              companyKey={String(companyPanelKey)}
-              initialTab="invoices"
-              onClose={() => setCompanyPanelKey(null)}
-            />
-          </div>
-        </div>
+        <CompanyDetailModal
+          companyKey={String(companyPanelKey)}
+          initialTab="invoices"
+          onClose={() => setCompanyPanelKey(null)}
+        />
+      )}
+
+      {invoiceDetailKey && (
+        <InvoiceFormModal
+          invoiceKey={invoiceDetailKey}
+          onClose={() => setInvoiceDetailKey(null)}
+          onSaved={() => { setInvoiceDetailKey(null); setStatementsKey(k => k + 1) }}
+        />
       )}
 
       {emailTarget && (

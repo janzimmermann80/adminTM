@@ -56,4 +56,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_bank_tx_vs      ON bank_transactions(vs);
 `)
 
+// Proforma zálohy: spárování na firmu (ne na fakturu) — idempotentní ALTER
+try { db.exec(`ALTER TABLE bank_transactions ADD COLUMN matched_company_key INTEGER`) } catch {}
+
 export default db
