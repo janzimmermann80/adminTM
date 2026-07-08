@@ -181,7 +181,7 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onOpenI
   tx: any
   onUnmatch: (id: number) => void
   onMatch: (tx: any) => void
-  onSettle: (tx: any) => void
+  onSettle: (tx: any, invoiceKey?: number) => void
   onOpenCompany: (companyKey: number) => void
   onOpenInvoice: (invoiceKey: number) => void
   onCreateInvoice: (tx: any) => void
@@ -252,9 +252,12 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onOpenI
         {isProforma && issuedInv && (
           issuedInv.settlement
             ? <span className="text-green-600 font-medium">{formatDate(issuedInv.settlement)}</span>
-            : <span className="text-gray-500 text-xs">Faktura {issuedInv.year}/{issuedInv.number}</span>
+            : <button onClick={() => onSettle(tx, issuedInv.invoice_key)} title={`Zaplatit fakturu ${issuedInv.year}/${issuedInv.number} — zapsat datum úhrady`}
+                className="text-xs border border-teal-600 text-teal-700 hover:bg-teal-50 px-2 py-0.5 rounded-lg transition-colors">
+                Zaplatit
+              </button>
         )}
-        {isMatched && isProforma && !issuedInv && (
+        {isProforma && !issuedInv && tx.vs_company_key && (
           <button onClick={() => onCreateInvoice(tx)}
             className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded-lg transition-colors">
             Vystavit fakturu
@@ -264,7 +267,7 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onOpenI
       <td className="px-4 py-2.5 text-right">
         {isMatched ? (
           <button onClick={() => onUnmatch(tx.id)} className="text-xs text-gray-400 hover:text-red-500 transition-colors">Odpárovat</button>
-        ) : proformaResolved ? null : (
+        ) : proformaResolved ? null : (isProforma && tx.vs_company_key) ? null : (
           <button onClick={() => onMatch(tx)} className="text-xs bg-teal-600 hover:bg-teal-700 text-white px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap">
             {isProforma ? 'Najít zálohu' : 'Najít fakturu'}
           </button>
@@ -430,13 +433,14 @@ function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onO
                         onOpenCompany={onOpenCompany}
                         onOpenInvoice={onOpenInvoice}
                         onCreateInvoice={onCreateInvoice}
-                        onSettle={async (tx) => {
+                        onSettle={async (tx, invoiceKey) => {
                           try {
-                            await settleInvoice(String(tx.matched_invoice_id), tx.transaction_date)
+                            await settleInvoice(String(invoiceKey ?? tx.matched_invoice_id), tx.transaction_date)
                             refreshTx(s.id)
-                            if (tx.invoice_company_key) {
-                              const { count } = await getUnpaidInvoicesCount(String(tx.invoice_company_key))
-                              if (count > 0) onOpenCompany(tx.invoice_company_key)
+                            const coKey = tx.invoice_company_key ?? tx.vs_company_key
+                            if (coKey) {
+                              const { count } = await getUnpaidInvoicesCount(String(coKey))
+                              if (count > 0) onOpenCompany(coKey)
                             }
                           } catch (e: any) { alert(e.message) }
                         }}

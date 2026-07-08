@@ -175,6 +175,7 @@ export async function bankRoutes(app: FastifyInstance) {
       }
 
       const proformaCompanyMap = await resolveProformaCompanyKeys(pgSql, transactions)
+      const proformaIssuedMap = await resolveProformaIssuedInvoices(pgSql, transactions)
 
       const txWithInvoice = transactions.map(t => ({
         ...t,
@@ -186,6 +187,7 @@ export async function bankRoutes(app: FastifyInstance) {
         invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
         vs_company_key: (String(t.vs ?? '').charAt(0) === '5' ? proformaCompanyMap[t.vs] : null)
           ?? invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        proforma_issued_invoice: t.vs ? (proformaIssuedMap[String(t.vs)] ?? null) : null,
       }))
 
       return reply.send({ ...stmt, transactions: txWithInvoice })
@@ -270,6 +272,7 @@ export async function bankRoutes(app: FastifyInstance) {
       }
 
       const proformaCompanyMap = await resolveProformaCompanyKeys(pgSql, transactions)
+      const proformaIssuedMap = await resolveProformaIssuedInvoices(pgSql, transactions)
 
       const result = transactions.map(t => ({
         ...t,
@@ -281,6 +284,7 @@ export async function bankRoutes(app: FastifyInstance) {
         invoice_settlement:  invoiceMap[t.matched_invoice_id]?.settlement ?? null,
         vs_company_key: (String(t.vs ?? '').charAt(0) === '5' ? proformaCompanyMap[t.vs] : null)
           ?? invoiceMap[t.matched_invoice_id]?.company_key ?? t.matched_company_key ?? null,
+        proforma_issued_invoice: t.vs ? (proformaIssuedMap[String(t.vs)] ?? null) : null,
       }))
 
       return reply.send(result)
@@ -436,6 +440,25 @@ async function resolveProformaCompanyKeys(pgSql: any, transactions: any[]): Prom
     `
     if (row) map[vs] = Number(row.company_key)
   }
+  return map
+}
+
+// Faktura vystavená k záloze: provider.invoice.proforma_number = parseInt(tx.vs).
+// Vrací mapu vs -> { invoice_key, number, year, settlement, company_key, company }.
+async function resolveProformaIssuedInvoices(pgSql: any, transactions: any[]): Promise<Record<string, any>> {
+  const map: Record<string, any> = {}
+  const proformaVs = [...new Set(
+    transactions.filter(t => t.vs && String(t.vs).charAt(0) === '5' && String(t.vs).length >= 8).map(t => String(t.vs))
+  )]
+  const vsNums = [...new Set(proformaVs.map(vs => parseInt(vs)).filter(n => !isNaN(n)))]
+  if (vsNums.length === 0) return map
+  const invoices = await pgSql`
+    SELECT i.invoice_key, i.number, i.year, i.settlement, i.company_key, i.proforma_number, c.company
+    FROM provider.invoice i
+    LEFT JOIN provider.company c ON i.company_key = c.company_key
+    WHERE i.proforma_number = ANY(${vsNums}) AND i.cancellation IS NULL
+  `
+  for (const inv of invoices) map[String(inv.proforma_number)] = inv
   return map
 }
 
