@@ -80,6 +80,7 @@ export async function queriesRoutes(app: FastifyInstance) {
     const { company_key, type, one_time, limit, offset } = request.query as {
       company_key?: string; type?: string; one_time?: string; limit?: string; offset?: string
     }
+    const oneTimeBool = one_time == null || one_time === '' ? null : one_time === 'true'
     const lim = Math.min(Number(limit) || 100, 500)
     const off = Number(offset) || 0
     const sql = getUserSql(userDb, passwordDb)
@@ -93,7 +94,7 @@ export async function queriesRoutes(app: FastifyInstance) {
         FROM provider.reports_schedule
         WHERE (${company_key ?? null}::bigint IS NULL OR company_key = ${company_key ?? null}::bigint)
           AND (${type ?? null}::text IS NULL OR btrim(type) = btrim(${type ?? null}::text))
-          AND (${one_time ?? null}::boolean IS NULL OR coalesce(one_time, false) = ${one_time ?? null}::boolean)
+          AND (${oneTimeBool}::boolean IS NULL OR coalesce(one_time, false) = ${oneTimeBool})
         ORDER BY created_time DESC NULLS LAST
         LIMIT ${lim} OFFSET ${off}
       `
@@ -136,17 +137,20 @@ export async function queriesRoutes(app: FastifyInstance) {
     const sql = getUserSql(userDb, passwordDb)
     try {
       const rows = await sql`
-        SELECT AB.book_key, AB.company_key, AB.company, AB.street, AB.city,
-               AB.zip, AB.country, AB.cin
-        FROM ta.address_book_base AS AB
-        WHERE AB.country IN ('CZ', 'SK')
-          AND AB.cin IS NOT NULL AND btrim(AB.cin) <> ''
-          AND AB.blocked IS NOT TRUE
-          AND NOT EXISTS (
-            SELECT 1 FROM provider.company AS C WHERE C.cin = AB.cin
-          )
-        ORDER BY AB.company
-        LIMIT 1000
+        SELECT * FROM (
+          SELECT DISTINCT ON (btrim(AB.cin))
+                 AB.book_key, AB.company_key, AB.company, AB.street, AB.city,
+                 AB.zip, AB.country, btrim(AB.cin) AS cin
+          FROM ta.address_book_base AS AB
+          WHERE AB.country IN ('CZ', 'SK')
+            AND btrim(AB.cin) ~ '^[0-9]{8}$'
+            AND AB.blocked IS NOT TRUE
+            AND NOT EXISTS (
+              SELECT 1 FROM provider.company AS C WHERE btrim(C.cin) = btrim(AB.cin)
+            )
+          ORDER BY btrim(AB.cin), AB.company
+        ) t
+        ORDER BY t.company
       `
       return reply.send(rows)
     } finally {

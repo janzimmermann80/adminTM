@@ -765,7 +765,7 @@ export const Queries = () => {
             {QUERIES.map(q => (
               <button
                 key={q.id}
-                onClick={() => { setActiveQuery(q.id); setFetched(false); setRsRows([]); setApRows([]); setAbncRows([]); setArbcRows([]); setError(null); setCompanyKey(''); setType(''); setOneTime(''); setOffset(0) }}
+                onClick={() => { setActiveQuery(q.id); setFetched(false); setRsRows([]); setApRows([]); setAbncRows([]); setArbcRows([]); setError(null); setCompanyKey(''); setType(''); setOneTime('true'); setOffset(0) }}
                 className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
                   activeQuery === q.id
                     ? 'bg-teal-50 text-teal-800 font-medium border-r-2 border-teal-600'

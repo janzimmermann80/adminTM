@@ -101,6 +101,7 @@ export async function companiesRoutes(app: FastifyInstance) {
         SELECT C.company_key, C.id, C.company, C.street, C.city, C.zip,
                C.country, C.cin, C.tin, C.bank, C.account, C.branch,
                C.tariff, C.region, C.provider, C.last_modif, C.parent_key,
+               T.name AS tariff_name,
                CD.credit_tip_sms, CD.contract, CD.contract_date,
                CD.prog_sent, CD.prog_sent_date, CD.prog_lent, CD.prog_lent_date,
                CD.admittance, CD.admittance_date, CD.forwarding, CD.forwarding_date,
@@ -111,6 +112,7 @@ export async function companiesRoutes(app: FastifyInstance) {
         FROM provider.company AS C
         LEFT JOIN provider.company_detail AS CD ON C.company_key = CD.company_key
         LEFT JOIN provider.company_invoice_address AS CIA ON C.company_key = CIA.company_key
+        LEFT JOIN provider.tariff AS T ON C.tariff = T.tariff
         WHERE C.company_key = ${id}
       `
 
@@ -133,11 +135,9 @@ export async function companiesRoutes(app: FastifyInstance) {
       const [r] = await sql`
         SELECT
           (SELECT count(*)::int FROM gps.car_base WHERE company_key = ${id}) AS cars_total,
-          (SELECT count(*)::int FROM gps.car_base cb
-             JOIN gps.last_upload_log lul ON lul.car_key = cb.car_key
-             WHERE cb.company_key = ${id} AND lul.time >= now() - interval '7 days') AS cars_active,
+          (SELECT count(*)::int FROM gps.car_base WHERE company_key = ${id} AND inactive IS NOT TRUE) AS cars_active,
           (SELECT count(*)::int FROM gps.simcard_base WHERE company_key = ${id}) AS sims_total,
-          (SELECT count(*)::int FROM gps.simcard_base WHERE company_key = ${id} AND ie_disabled IS NOT TRUE) AS sims_active,
+          (SELECT count(*)::int FROM gps.simcard_base WHERE company_key = ${id} AND our_sim IS TRUE) AS sims_active,
           (SELECT count(*)::int FROM ta.obligation_base WHERE company_key = ${id}) AS obl_total,
           (SELECT count(*)::int FROM ta.obligation_base WHERE company_key = ${id} AND created_time >= now() - interval '7 days') AS obl_recent,
           (SELECT count(*)::int FROM ta.invoice_base WHERE company_key = ${id}) AS inv_total,

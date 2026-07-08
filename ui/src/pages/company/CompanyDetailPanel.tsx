@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Spinner } from '../../components/Spinner'
-import { getCompany, getCompanySummary, createDiaryEntry, getContacts, getImpersonateUrl } from '../../api'
+import { getCompany, getCompanySummary, createDiaryEntry, getContacts, getImpersonateUrl, getDiaryEmployees } from '../../api'
 import { formatDate } from '../../utils'
 import { useAuth } from '../../context/AuthContext'
 import type { CompanyDetail as ICompanyDetail } from '../../types'
@@ -12,17 +12,16 @@ import { TabVehicles } from './TabVehicles'
 import { TabNotes } from './TabNotes'
 import { TabOnline } from './TabOnline'
 
-const StatBadge = ({ label, active, total, activeLabel }: {
-  label: string; active: number; total: number; activeLabel: string
+const SplitBadge = ({ label, a, aLabel, b, bLabel }: {
+  label: string; a: number; aLabel: string; b: number; bLabel?: string
 }) => (
   <div className="flex items-center gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">
     <span className="text-xs text-gray-500 font-medium">{label}:</span>
-    <span className={`text-xs font-bold tabular-nums ${active > 0 ? 'text-teal-700' : 'text-gray-400'}`}>
-      {active}
-    </span>
+    <span className={`text-xs font-bold tabular-nums ${a > 0 ? 'text-teal-700' : 'text-gray-400'}`}>{a}</span>
+    <span className="text-xs text-gray-400 hidden sm:inline">({aLabel})</span>
     <span className="text-xs text-gray-300">/</span>
-    <span className="text-xs text-gray-600 tabular-nums font-semibold">{total}</span>
-    <span className="text-xs text-gray-400 hidden sm:inline">({activeLabel})</span>
+    <span className={`text-xs font-bold tabular-nums ${b > 0 ? 'text-teal-700' : 'text-gray-400'}`}>{b}</span>
+    {bLabel && <span className="text-xs text-gray-400 hidden sm:inline">({bLabel})</span>}
   </div>
 )
 
@@ -57,9 +56,17 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
   const [diaryText, setDiaryText]   = useState('')
   const [diaryDate, setDiaryDate]   = useState('')
   const [diaryTime, setDiaryTime]   = useState('')
+  const [diaryOwner, setDiaryOwner] = useState('')
+  const [diaryEmployees, setDiaryEmployees] = useState<string[]>([])
   const [diarySaving, setDiarySaving] = useState(false)
   const [diaryError, setDiaryError] = useState('')
   const diaryRef = useRef<HTMLTextAreaElement>(null)
+
+  const canPickOwner = user?.accessRights?.[14] === '1'
+
+  useEffect(() => {
+    if (canPickOwner) getDiaryEmployees().then(setDiaryEmployees).catch(() => {})
+  }, [canPickOwner])
 
   const todayStr = () => new Date().toISOString().slice(0, 10)
   const nowTimeStr = () => new Date().toTimeString().slice(0, 5)
@@ -68,18 +75,20 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
     setDiaryText('')
     setDiaryDate(todayStr())
     setDiaryTime(nowTimeStr())
+    setDiaryOwner(user?.initials ?? '')
     setDiaryError('')
     setDiaryOpen(true)
     setTimeout(() => diaryRef.current?.focus(), 50)
   }
 
   const handleSaveDiary = async () => {
-    if (!diaryText.trim() || !user?.initials) return
+    const owner = diaryOwner || user?.initials
+    if (!diaryText.trim() || !owner) return
     setDiarySaving(true)
     setDiaryError('')
     try {
       await createDiaryEntry({
-        owner: user.initials,
+        owner,
         company_key: Number(companyKey),
         time: diaryDate + 'T' + (diaryTime || '08:00') + ':00',
         text: diaryText.trim(),
@@ -169,6 +178,11 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
                   </span>
                 )
               })()}
+              {company.tariff_name && (
+                <span className="bg-teal-100 text-[#0a6b6b] text-xs rounded-full px-2.5 py-0.5 font-medium self-center">
+                  {company.tariff_name}
+                </span>
+              )}
               <button
                 onClick={openDiary}
                 title="Přidat záznam do deníku"
@@ -178,11 +192,6 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
                   <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                 </svg>
               </button>
-              {company.tariff_name && (
-                <span className="bg-teal-100 text-[#0a6b6b] text-xs rounded-full px-2.5 py-0.5 font-medium self-center">
-                  {company.tariff_name}
-                </span>
-              )}
             </h1>
             <div className="ml-auto flex items-center gap-3 shrink-0">
               <div className="text-right text-xs text-gray-400">
@@ -225,11 +234,11 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
           </div>
           {summary && (
             <div className="flex flex-wrap gap-3 mt-3">
-              <StatBadge label="Auta"       active={summary.cars.active}        total={summary.cars.total}        activeLabel="7 dní" />
-              <StatBadge label="SIM"        active={summary.sims.active}        total={summary.sims.total}        activeLabel="aktivní" />
-              <StatBadge label="Zakázky"    active={summary.obligations.recent} total={summary.obligations.total} activeLabel="7 dní" />
-              <StatBadge label="Faktury"    active={summary.invoices.recent}    total={summary.invoices.total}    activeLabel="7 dní" />
-              <StatBadge label="Objednávky" active={summary.orders.recent}      total={summary.orders.total}      activeLabel="7 dní" />
+              <SplitBadge label="Auta" a={summary.cars.active} aLabel="aktivní" b={summary.cars.total} />
+              <SplitBadge label="SIM" a={summary.sims.active} aLabel="naše" b={summary.sims.total - summary.sims.active} bLabel="vlastní" />
+              <SplitBadge label="Zakázky" a={summary.obligations.recent} aLabel="7 dní" b={summary.obligations.total} />
+              <SplitBadge label="Faktury" a={summary.invoices.recent} aLabel="7 dní" b={summary.invoices.total} />
+              <SplitBadge label="Objednávky" a={summary.orders.recent} aLabel="7 dní" b={summary.orders.total} />
             </div>
           )}
         </div>
@@ -240,6 +249,18 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
         <div className="bg-white rounded-xl shadow-sm border border-teal-200 px-5 py-4 mb-5">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Nový záznam do deníku</p>
           <div className="flex gap-2 mb-2">
+            {canPickOwner && diaryEmployees.length > 0 && (
+              <select
+                value={diaryOwner}
+                onChange={e => setDiaryOwner(e.target.value)}
+                title="Komu do deníku"
+                className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-teal-500 bg-white"
+              >
+                {diaryEmployees.map(emp => (
+                  <option key={emp} value={emp}>{emp}</option>
+                ))}
+              </select>
+            )}
             <input
               type="date"
               value={diaryDate}
