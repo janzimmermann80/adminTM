@@ -93,9 +93,13 @@ function computeInvoiceTotals(items: InvoiceItem[], currValue: number) {
 
   const priceSum = priceLow + priceHigh
   const totalSum = priceSum + vatLow + vatHigh
+  // Konvence provider.invoice (nativní TM): sloupce price/price_*/vat_*/total = CZK (částka × kurz),
+  // curr_* = částka v měně faktury (EUR). Položky invoice_item se ukládají v měně faktury (EUR).
   return {
     priceLow, priceHigh, vatLow, vatHigh, vatLowRate, vatHighRate, priceSum, totalSum,
     currPrice: priceSum * currValue,
+    currPriceLow: priceLow * currValue,
+    currPriceHigh: priceHigh * currValue,
     currTotal: totalSum * currValue,
     currVatLow: vatLow * currValue,
     currVatHigh: vatHigh * currValue,
@@ -580,9 +584,9 @@ export async function invoicingRoutes(app: FastifyInstance) {
         ) VALUES (
           ${body.company_key}, ${year}, ${nextNum}, ${provider}, ${body.series},
           ${body.issued}, ${body.maturity}, ${body.fulfilment}, ${body.settlement ?? null},
-          ${c.priceSum}, ${c.priceLow}, ${c.priceHigh}, ${c.vatLowRate}, ${c.vatLow},
-          ${c.vatHighRate}, ${c.vatHigh}, ${c.totalSum},
-          ${c.currPrice}, ${c.currVatLow}, ${c.currVatHigh}, ${c.currTotal},
+          ${c.currPrice}, ${c.currPriceLow}, ${c.currPriceHigh}, ${c.vatLowRate}, ${c.currVatLow},
+          ${c.vatHighRate}, ${c.currVatHigh}, ${c.currTotal},
+          ${c.priceSum}, ${c.vatLow}, ${c.vatHigh}, ${c.totalSum},
           ${body.payment_method}, ${body.currency}, ${currValue}, ${body.demand_notes ?? 0},
           ${body.proforma_number ?? null}
         )
@@ -634,11 +638,11 @@ export async function invoicingRoutes(app: FastifyInstance) {
           settlement = ${body.settlement ?? null}, series = ${body.series},
           payment_method = ${body.payment_method}, currency = ${body.currency}, rate = ${currValue},
           proforma_number = ${body.proforma_number ?? null}, demand_notes = ${body.demand_notes ?? 0},
-          price = ${c.priceSum}, price_low = ${c.priceLow}, price_high = ${c.priceHigh},
-          vat_low_rate = ${c.vatLowRate}, vat_low = ${c.vatLow},
-          vat_high_rate = ${c.vatHighRate}, vat_high = ${c.vatHigh}, total = ${c.totalSum},
-          curr_price = ${c.currPrice}, curr_vat_low = ${c.currVatLow},
-          curr_vat_high = ${c.currVatHigh}, curr_total = ${c.currTotal}
+          price = ${c.currPrice}, price_low = ${c.currPriceLow}, price_high = ${c.currPriceHigh},
+          vat_low_rate = ${c.vatLowRate}, vat_low = ${c.currVatLow},
+          vat_high_rate = ${c.vatHighRate}, vat_high = ${c.currVatHigh}, total = ${c.currTotal},
+          curr_price = ${c.priceSum}, curr_vat_low = ${c.vatLow},
+          curr_vat_high = ${c.vatHigh}, curr_total = ${c.totalSum}
         WHERE invoice_key = ${id}
         RETURNING invoice_key
       `

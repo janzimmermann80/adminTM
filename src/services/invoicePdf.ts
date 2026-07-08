@@ -147,8 +147,8 @@ function buildDocDefinition(inv: any, useLogo: boolean): any {
 
   // ── DATUMY ───────────────────────────────────────────────────────────────────
   const dateCells = [
-    { label: 'DATUM VYSTAVENÍ', val: fmtDate(inv.issued), orange: false },
     { label: 'DATUM PLNĚNÍ', val: fmtDate(inv.fulfilment), orange: false },
+    { label: 'DATUM VYSTAVENÍ', val: fmtDate(inv.issued), orange: false },
     { label: 'DATUM SPLATNOSTI', val: fmtDate(inv.maturity), orange: true },
     { label: 'ZPŮSOB PLATBY', val: PAY[inv.payment_method] ?? inv.payment_method ?? '', orange: false },
   ].map((d) => ({

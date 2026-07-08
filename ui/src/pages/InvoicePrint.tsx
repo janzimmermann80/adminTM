@@ -179,8 +179,8 @@ export const InvoicePrint = () => {
         marginBottom: 14, overflow: 'hidden',
       }}>
         {[
-          { label: 'Datum vystavení',  val: fmtDate(inv.issued),      orange: false },
           { label: 'Datum plnění',     val: fmtDate(inv.fulfilment),  orange: false },
+          { label: 'Datum vystavení',  val: fmtDate(inv.issued),      orange: false },
           { label: 'Datum splatnosti', val: fmtDate(inv.maturity),    orange: true  },
           { label: 'Způsob platby',    val: PAY[inv.payment_method] ?? inv.payment_method ?? '', orange: false },
         ].map((d, i) => (
