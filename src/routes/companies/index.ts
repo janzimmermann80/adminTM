@@ -334,8 +334,10 @@ export async function companiesRoutes(app: FastifyInstance) {
     const offset = Number(q.offset ?? 0)
 
     try {
-      const [{ count }] = await sql`
-        SELECT count(*)::int AS count FROM provider.invoice WHERE company_key = ${id}
+      const [{ count, base_sum }] = await sql`
+        SELECT count(*)::int AS count,
+               coalesce(sum(price) FILTER (WHERE series <> 6), 0)::float8 AS base_sum
+        FROM provider.invoice WHERE company_key = ${id}
       `
       const rows = await sql`
         SELECT I.invoice_key, I.year, I.number, I.series, I.issued, I.fulfilment,
@@ -350,7 +352,7 @@ export async function companiesRoutes(app: FastifyInstance) {
         ORDER BY I.fulfilment DESC
         LIMIT ${limit} OFFSET ${offset}
       `
-      return reply.send({ total: count, limit, offset, data: rows })
+      return reply.send({ total: count, base_sum, limit, offset, data: rows })
     } finally {
       await sql.end()
     }

@@ -144,6 +144,7 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
   const invoiceVs = (inv: Invoice) => `${inv.series}${String(companyId).slice(-5)}${String(inv.number).padStart(4,'0')}`
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [total, setTotal]       = useState(0)
+  const [baseSum, setBaseSum]   = useState(0)
   const [offset, setOffset]     = useState(0)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
@@ -161,6 +162,7 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
       const res = await getInvoices(companyKey, off, LIMIT)
       setInvoices(res.data)
       setTotal(res.total)
+      setBaseSum(res.base_sum ?? 0)
       return res.data as Invoice[]
     } catch (e: any) { setError(e.message); return [] as Invoice[] }
     finally { setLoading(false) }
@@ -209,7 +211,9 @@ export const TabInvoices = ({ companyKey, companyId = '' }: Props) => {
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>}
 
       <div className="flex items-center justify-between mb-4">
-        <span className="text-sm text-gray-500">Celkem faktur: <strong>{total}</strong></span>
+        <span className="text-sm text-gray-500">Celkem faktur: <strong>{total}</strong>
+          <span className="ml-3">Základ (bez DPH, kromě série 6): <strong>{formatNumber(baseSum)} Kč</strong></span>
+        </span>
         <div className="flex items-center gap-2">
           {loading && <Spinner size={4}/>}
           <button onClick={() => setNewInvoiceOpen(true)}

@@ -117,7 +117,7 @@ export const upsertUserAccount = (id: string, body: Record<string, any>) => put<
 
 // invoices
 export const getInvoices = (id: string, offset = 0, limit = 10) =>
-  get<{ total: number; data: any[] }>(`/companies/${id}/invoices?limit=${limit}&offset=${offset}`)
+  get<{ total: number; base_sum: number; data: any[] }>(`/companies/${id}/invoices?limit=${limit}&offset=${offset}`)
 
 export const getInvoicingList = (params: {
   year?: number; company_key?: string; number?: string; date_from?: string; date_to?: string
