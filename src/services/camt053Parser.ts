@@ -196,6 +196,19 @@ function extractVs(refs: any, addtlInfo: string, strdRefs: string[], rmtUstrd: s
   const vsFromUstrd = extractSymbol('VS', rmtUstrd)
   if (vsFromUstrd) return vsFromUstrd
 
+  // 5. Fallback: samostatný číselný běh 4–10 číslic v EndToEndId / Ustrd.
+  //    Pokrývá případy, kdy plátce před VS připíše volný text
+  //    (např. "FAKTURA 8001919101", "PLATBA-12345", "SPZ ABC 5400278241").
+  for (const src of [e2e, rmtUstrd]) {
+    if (!src) continue
+    const matches = src.match(/\d{4,10}/g)
+    if (matches && matches.length) {
+      // Nejdelší (při shodě délky poslední) — reálné VS bývá 8–10 číslic,
+      // zatímco parazitní čísla (SPZ, letopočet) jsou kratší.
+      return matches.reduce((best, cur) => cur.length >= best.length ? cur : best)
+    }
+  }
+
   return ''
 }
 
