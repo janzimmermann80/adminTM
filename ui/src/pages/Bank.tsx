@@ -520,14 +520,12 @@ export const Bank = () => {
       const itemName = series === 4
         ? `Předplatné systému TruckManager Doprava & Spedice pro ${vehicles} vozidel`
         : series === 1 ? 'Předplatné systému TruckManager Spedice' : ''
-      const total = inv.curr_total != null ? Number(inv.curr_total) : tx.amount
-      const paidTotal = inv.currency !== 'CZK' && Number(inv.exchange_rate) > 1
-        ? total / Number(inv.exchange_rate)
-        : total
-      // price_unit = cena za 1 měsíc (celková / měsíce, bez DPH)
+      // curr_total v demo.proforma_invoice je již v měně faktury (EUR/CZK),
+      // NIKDY se nedělí kurzem. price_unit = cena za 1 měsíc bez DPH.
+      const fcy = Number(inv.curr_total ?? tx.amount)
       const priceUnit = inv.currency === 'CZK'
-        ? Math.round(paidTotal / months / 1.21 * 100) / 100
-        : Math.round(paidTotal / months * 100) / 100
+        ? Math.round(fcy / months / 1.21 * 100) / 100
+        : Math.round(fcy / months * 100) / 100
       setInvoiceFormTarget({
         companyKey,
         proformaData: inv,
