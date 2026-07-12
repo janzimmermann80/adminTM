@@ -23,6 +23,10 @@ const fmtAmt = (total: number, curr_total: number | null, currency: string) => {
 const vs = (series: string | number, companyId: string | null, number: number) =>
   `${series}${String(companyId ?? '').slice(-5)}${String(number).padStart(4, '0')}`
 
+// Zálohová (proforma) faktura: VS = '5' + série + číslo.
+const vsProforma = (series: string | number, number: number) =>
+  `5${series}${number}`
+
 const PAGE_SIZE = 50
 
 type InvoiceRow = {
@@ -205,7 +209,7 @@ const InvoiceTable = ({ rows, loading, error, isProforma }: TableProps) => {
                   <td className="px-2 py-1.5 text-gray-500 tabular-nums">{r.series}</td>
                   <td className="px-2 py-1.5 text-right font-mono tabular-nums font-medium">{r.number}</td>
                   <td className="px-2 py-1.5 font-mono tabular-nums text-gray-400 whitespace-nowrap">
-                    {vs(r.series, r.id, r.number)}
+                    {vsProforma(r.series, r.number)}
                   </td>
                   <td className="px-2 py-1.5 max-w-[220px] truncate">
                     {r.company_key
