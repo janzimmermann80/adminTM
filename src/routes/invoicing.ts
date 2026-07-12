@@ -16,10 +16,12 @@ export const PAYMENT_METHODS: Record<string, string> = {
 interface InvoiceListQuery {
   year?: string
   company_key?: string
+  number?: string
   date_from?: string
   date_to?: string
   series?: string
   settled?: string    // 'yes' | 'no'
+  proforma?: string   // 'true' | 'false'
   limit?: string
   offset?: string
 }
@@ -211,6 +213,42 @@ export async function invoicingRoutes(app: FastifyInstance) {
     const limit = Math.min(Number(q.limit ?? 25), 200)
     const offset = Number(q.offset ?? 0)
 
+    // Zálohové (proforma) faktury žijí v samostatné tabulce demo.proforma_invoice
+    // (jiné schéma i tvar – nemá invoice_key, settlement, cancellation, fulfilment ani proforma_number).
+    if (q.proforma === 'true') {
+      const yearF = q.year        ? sql`AND p.year = ${Number(q.year)}`               : sql``
+      const compF = q.company_key ? sql`AND p.company_key = ${Number(q.company_key)}` : sql``
+      const numF  = q.number      ? sql`AND p.number = ${Number(q.number)}`           : sql``
+      const fromF = q.date_from   ? sql`AND p.issued >= ${q.date_from}`               : sql``
+      const toF   = q.date_to     ? sql`AND p.issued <= ${q.date_to}`                 : sql``
+      try {
+        const [{ count }] = await sql`
+          SELECT count(*)::int AS count
+          FROM demo.proforma_invoice AS p
+          WHERE true ${yearF} ${compF} ${numF} ${fromF} ${toF}
+        `
+        const data = await sql`
+          SELECT p.number AS invoice_key, p.year, p.number, p.series::text AS series,
+                 p.issued, NULL::date AS fulfilment, p.maturity,
+                 NULL::date AS settlement, NULL::date AS cancellation,
+                 p.curr_total::float8 AS price, p.curr_total::float8 AS total,
+                 p.curr_total::float8 AS curr_total, p.currency,
+                 NULL::int AS proforma_number,
+                 p.quantity, p.car_num, p.detail,
+                 p.exchange_rate::float8 AS exchange_rate, p.payment_method,
+                 p.company_key, c.id, c.company
+          FROM demo.proforma_invoice AS p
+          LEFT JOIN provider.company AS c ON p.company_key = c.company_key
+          WHERE true ${yearF} ${compF} ${numF} ${fromF} ${toF}
+          ORDER BY p.issued DESC, p.number DESC
+          LIMIT ${limit} OFFSET ${offset}
+        `
+        return reply.send({ total: count, limit, offset, data })
+      } finally {
+        await sql.end()
+      }
+    }
+
     const whereClauses: string[] = []
     const params: unknown[] = []
     let p = 1
@@ -218,6 +256,7 @@ export async function invoicingRoutes(app: FastifyInstance) {
 
     if (q.year) whereClauses.push(`I.year = ${addParam(Number(q.year))}`)
     if (q.company_key) whereClauses.push(`I.company_key = ${addParam(Number(q.company_key))}`)
+    if (q.number) whereClauses.push(`I.number = ${addParam(Number(q.number))}`)
     if (q.date_from) whereClauses.push(`I.issued >= ${addParam(q.date_from)}`)
     if (q.date_to) whereClauses.push(`I.issued <= ${addParam(q.date_to)}`)
     if (q.series) whereClauses.push(`I.series = ${addParam(Number(q.series))}`)

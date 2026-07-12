@@ -43,6 +43,11 @@ type InvoiceRow = {
   company_key: number | null
   id: string | null
   company: string | null
+  quantity?: number | null
+  car_num?: number | null
+  detail?: string | null
+  exchange_rate?: number | null
+  payment_method?: string | null
 }
 
 // ── Filtrační panel ───────────────────────────────────────────────────────────
@@ -118,14 +123,16 @@ const FilterPanel = ({ filters, onChange, onRun, loading, isProforma, total, off
           <label className="block text-xs text-gray-500 mb-1">do</label>
           <input type="date" value={filters.date_to} onChange={set('date_to')} className={ic} />
         </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Úhrada</label>
-          <select value={filters.settled} onChange={set('settled')} className={ic}>
-            <option value="">vše</option>
-            <option value="no">Neuhrazené</option>
-            <option value="yes">Uhrazené</option>
-          </select>
-        </div>
+        {!isProforma && (
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Úhrada</label>
+            <select value={filters.settled} onChange={set('settled')} className={ic}>
+              <option value="">vše</option>
+              <option value="no">Neuhrazené</option>
+              <option value="yes">Uhrazené</option>
+            </select>
+          </div>
+        )}
         <button onClick={onRun} disabled={loading}
           className="px-4 py-1.5 bg-teal-600 text-white text-sm rounded hover:bg-teal-700 disabled:opacity-50 transition-colors">
           {loading ? 'Načítám…' : 'Spustit'}
@@ -175,12 +182,58 @@ const InvoiceTable = ({ rows, loading, error, isProforma }: TableProps) => {
         <CompanyDetailModal companyKey={String(companyModal)} onClose={() => setCompanyModal(null)} />
       )}
       <div className="overflow-x-auto">
+        {isProforma ? (
+          <table className="min-w-full text-xs border-collapse">
+            <thead>
+              <tr className="bg-gray-100 text-gray-600 uppercase tracking-wide text-[11px]">
+                <th className="px-2 py-2 text-right border-b whitespace-nowrap">Rok</th>
+                <th className="px-2 py-2 text-left border-b whitespace-nowrap">Řada</th>
+                <th className="px-2 py-2 text-right border-b whitespace-nowrap">Číslo</th>
+                <th className="px-2 py-2 text-left border-b whitespace-nowrap" title="Variabilní symbol pro platbu">VS</th>
+                <th className="px-2 py-2 text-left border-b">Firma</th>
+                <th className="px-2 py-2 text-left border-b whitespace-nowrap">Vystaveno</th>
+                <th className="px-2 py-2 text-left border-b whitespace-nowrap">Splatnost</th>
+                <th className="px-2 py-2 text-right border-b whitespace-nowrap">Počet</th>
+                <th className="px-2 py-2 text-right border-b whitespace-nowrap">Aut</th>
+                <th className="px-2 py-2 text-right border-b whitespace-nowrap">Částka</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={`${r.year}-${r.number}`} className="border-b hover:bg-gray-50">
+                  <td className="px-2 py-1.5 text-right tabular-nums">{r.year}</td>
+                  <td className="px-2 py-1.5 text-gray-500 tabular-nums">{r.series}</td>
+                  <td className="px-2 py-1.5 text-right font-mono tabular-nums font-medium">{r.number}</td>
+                  <td className="px-2 py-1.5 font-mono tabular-nums text-gray-400 whitespace-nowrap">
+                    {vs(r.series, r.id, r.number)}
+                  </td>
+                  <td className="px-2 py-1.5 max-w-[220px] truncate">
+                    {r.company_key
+                      ? <button onClick={() => setCompanyModal(r.company_key!)}
+                          className="text-left hover:underline hover:text-teal-700 max-w-full truncate block"
+                          title={r.company ?? ''}>
+                          {r.company}
+                        </button>
+                      : <span className="text-gray-400">{r.company}</span>
+                    }
+                  </td>
+                  <td className="px-2 py-1.5 tabular-nums whitespace-nowrap">{fmtD(r.issued)}</td>
+                  <td className="px-2 py-1.5 tabular-nums whitespace-nowrap">{fmtD(r.maturity)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{r.quantity ?? ''}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums text-gray-500">{r.car_num ?? ''}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums font-medium whitespace-nowrap">
+                    {fmtAmt(r.total, r.curr_total, r.currency)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
         <table className="min-w-full text-xs border-collapse">
           <thead>
             <tr className="bg-gray-100 text-gray-600 uppercase tracking-wide text-[11px]">
               <th className="px-2 py-2 text-left border-b whitespace-nowrap">VS</th>
-              {!isProforma && <th className="px-2 py-2 text-left border-b whitespace-nowrap">Řada</th>}
-              {isProforma && <th className="px-2 py-2 text-right border-b whitespace-nowrap">proforma_number</th>}
+              <th className="px-2 py-2 text-left border-b whitespace-nowrap">Řada</th>
               <th className="px-2 py-2 text-left border-b">Firma</th>
               <th className="px-2 py-2 text-left border-b whitespace-nowrap">Vystaveno</th>
               <th className="px-2 py-2 text-left border-b whitespace-nowrap">Plnění</th>
@@ -207,16 +260,9 @@ const InvoiceTable = ({ rows, loading, error, isProforma }: TableProps) => {
                       {vsStr}
                     </a>
                   </td>
-                  {!isProforma && (
-                    <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">
-                      {INVOICE_SERIES_LABELS[r.series] ?? r.series}
-                    </td>
-                  )}
-                  {isProforma && (
-                    <td className="px-2 py-1.5 text-right font-mono tabular-nums text-gray-500">
-                      {r.proforma_number ?? '—'}
-                    </td>
-                  )}
+                  <td className="px-2 py-1.5 text-gray-500 whitespace-nowrap">
+                    {INVOICE_SERIES_LABELS[r.series] ?? r.series}
+                  </td>
                   <td className="px-2 py-1.5 max-w-[220px] truncate">
                     {r.company_key
                       ? <button onClick={() => setCompanyModal(r.company_key!)}
@@ -249,6 +295,7 @@ const InvoiceTable = ({ rows, loading, error, isProforma }: TableProps) => {
             })}
           </tbody>
         </table>
+        )}
       </div>
     </>
   )
