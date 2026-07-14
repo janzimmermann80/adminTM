@@ -5,6 +5,7 @@
 import { XMLParser } from 'fast-xml-parser'
 
 export interface ParsedStatement {
+  seqNumber: number | null
   accountIban: string
   accountNumber: string
   periodFrom: string
@@ -57,6 +58,11 @@ export function parseCamt053(xmlContent: string): ParsedStatement {
 
   if (!stmt) throw new Error('Neplatný CAMT.053 XML — element Stmt nenalezen')
 
+  // Pořadové číslo výpisu (dle banky)
+  const seqNumber: number | null = stmt['ElctrncSeqNb'] != null
+    ? Number(stmt['ElctrncSeqNb'])
+    : stmt['LglSeqNb'] != null ? Number(stmt['LglSeqNb']) : null
+
   // Účet
   const acctId = stmt['Acct']?.['Id']
   const accountIban: string = acctId?.['IBAN'] ?? acctId?.['Othr']?.['Id'] ?? ''
@@ -89,6 +95,7 @@ export function parseCamt053(xmlContent: string): ParsedStatement {
   const transactions: ParsedTransaction[] = entries.map((ntry: any) => parseEntry(ntry, currency))
 
   return {
+    seqNumber,
     accountIban,
     accountNumber,
     periodFrom,

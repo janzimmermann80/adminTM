@@ -6,12 +6,15 @@ import multipart from '@fastify/multipart'
 import db from '../db/bankDb.js'
 import iconv from 'iconv-lite'
 
+// Pořadové číslo výpisu (dle banky) — idempotentní ALTER pro starší DB
+try { db.exec(`ALTER TABLE bank_statements ADD COLUMN seq_number INTEGER`) } catch {}
+
 const stmtInsertStatement = db.prepare(`
   INSERT OR IGNORE INTO bank_statements
     (filename, account_iban, account_number, period_from, period_to,
-     opening_balance, closing_balance, currency)
+     opening_balance, closing_balance, currency, seq_number)
   VALUES (@filename, @account_iban, @account_number, @period_from, @period_to,
-          @opening_balance, @closing_balance, @currency)
+          @opening_balance, @closing_balance, @currency, @seq_number)
 `)
 
 const stmtGetStatementByFilename = db.prepare(
@@ -70,6 +73,7 @@ export async function bankRoutes(app: FastifyInstance) {
               opening_balance: stmt.openingBalance,
               closing_balance: stmt.closingBalance,
               currency: stmt.currency,
+              seq_number: stmt.seqNumber ?? null,
             })
             const saved = stmtGetStatementByFilename.get(filename) as any
             for (const tx of stmt.transactions) {
@@ -372,21 +376,33 @@ export async function bankRoutes(app: FastifyInstance) {
         // Zálohové (proforma) faktury — hledáme v demo.proforma_invoice.
         // invoice_key aliasujeme na company_key, protože proforma se páruje na firmu.
         const searchTerm = (q.q ?? '').trim()
-        if (/^5\d{7,}$/.test(searchTerm)) {
-          // Plný proforma VS: '5' + series(1) + company.id_pravých5 + číslo
+        if (/^5\d{2,}$/.test(searchTerm)) {
           const series = Number(searchTerm[1])
-          const companyIdSuffix = searchTerm.slice(2, 7)
-          const number = Number(searchTerm.slice(7))
+          // Nový formát VS: '5' + series(1) + číslo
           rows = await pgSql`
             SELECT p.company_key AS invoice_key, p.*, c.company, c.id AS company_id
             FROM demo.proforma_invoice p
             LEFT JOIN provider.company c ON p.company_key = c.company_key
             WHERE p.series = ${series}
-              AND RIGHT(c.id::text, 5) = ${companyIdSuffix}
-              AND p.number = ${number}
+              AND p.number = ${Number(searchTerm.slice(2))}
             ORDER BY p.issued DESC
             LIMIT 20
           `
+          // Fallback starý formát VS: '5' + series(1) + company.id_pravých5 + číslo
+          if (rows.length === 0 && searchTerm.length >= 8) {
+            const companyIdSuffix = searchTerm.slice(2, 7)
+            const number = Number(searchTerm.slice(7))
+            rows = await pgSql`
+              SELECT p.company_key AS invoice_key, p.*, c.company, c.id AS company_id
+              FROM demo.proforma_invoice p
+              LEFT JOIN provider.company c ON p.company_key = c.company_key
+              WHERE p.series = ${series}
+                AND RIGHT(c.id::text, 5) = ${companyIdSuffix}
+                AND p.number = ${number}
+              ORDER BY p.issued DESC
+              LIMIT 20
+            `
+          }
         } else {
           rows = await pgSql`
             SELECT p.company_key AS invoice_key, p.*, c.company, c.id AS company_id
@@ -420,24 +436,35 @@ export async function bankRoutes(app: FastifyInstance) {
   })
 }
 
-// VS kóduje firmu: zálohová (proforma) platba má VS ve tvaru '5'+série+ID5+číslo.
-// Firmu dohledáme přes tabulku záloh (přesně dle série + ID firmy + čísla).
+// VS kóduje firmu: zálohová (proforma) platba má VS ve tvaru '5'+série+číslo (nově)
+// nebo starší '5'+série+ID5+číslo. Podporujeme oba — zkusíme nejdřív nový, pak fallback na starý.
 async function resolveProformaCompanyKeys(pgSql: any, transactions: any[]): Promise<Record<string, number>> {
   const map: Record<string, number> = {}
   const proformaVs = [...new Set(
     transactions.filter(t => t.vs && String(t.vs).charAt(0) === '5').map(t => String(t.vs))
   )]
   for (const vs of proformaVs) {
-    if (!/^5\d{7,}$/.test(vs)) continue
+    if (!/^5\d{2,}$/.test(vs)) continue
     const series = Number(vs[1])
-    const company5 = vs.slice(2, 7)
-    const number = Number(vs.slice(7))
-    const [row] = await pgSql`
+    // Nový formát: '5' + series + číslo
+    let [row] = await pgSql`
       SELECT p.company_key FROM demo.proforma_invoice p
-      JOIN provider.company c ON c.company_key = p.company_key
-      WHERE p.series = ${series} AND RIGHT(c.id::text, 5) = ${company5} AND p.number = ${number}
+      WHERE p.series = ${series} AND p.number = ${Number(vs.slice(2))}
+      ORDER BY p.issued DESC
       LIMIT 1
     `
+    // Fallback starý formát: '5' + series + ID5 + číslo
+    if (!row && vs.length >= 8) {
+      const company5 = vs.slice(2, 7)
+      const number = Number(vs.slice(7))
+      ;[row] = await pgSql`
+        SELECT p.company_key FROM demo.proforma_invoice p
+        JOIN provider.company c ON c.company_key = p.company_key
+        WHERE p.series = ${series} AND RIGHT(c.id::text, 5) = ${company5} AND p.number = ${number}
+        ORDER BY p.issued DESC
+        LIMIT 1
+      `
+    }
     if (row) map[vs] = Number(row.company_key)
   }
   return map

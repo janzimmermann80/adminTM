@@ -46,6 +46,11 @@ export function parseFinsta(xmlContent: string): ParsedStatement {
 
   const s = stmts[0]
 
+  // Pořadové číslo výpisu (dle banky)
+  const seqNumber: number | null = s['S28_CISLO_VYPISU'] != null
+    ? Number(s['S28_CISLO_VYPISU'])
+    : null
+
   const currency: string = String(s['S60_MENA'] ?? 'CZK')
   const openingBalance = parseAmount(s['S60_CASTKA']) * (s['S60_CD_INDIK'] === 'D' ? -1 : 1)
   const closingBalance = parseAmount(s['S62_CASTKA']) * (s['S62_CD_INDIK'] === 'D' ? -1 : 1)
@@ -96,6 +101,7 @@ export function parseFinsta(xmlContent: string): ParsedStatement {
   })
 
   return {
+    seqNumber,
     accountIban: '',
     accountNumber,
     periodFrom,

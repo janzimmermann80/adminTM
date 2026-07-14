@@ -28,6 +28,7 @@ db.exec(`
     opening_balance REAL,
     closing_balance REAL,
     currency TEXT DEFAULT 'CZK',
+    seq_number INTEGER,
     downloaded_at TEXT DEFAULT (datetime('now'))
   );
 
