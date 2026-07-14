@@ -1425,7 +1425,7 @@ function extractVs(refs: any, addtlInfo: string, strdRefs: string[], rmtUstrd: s
 
 function extractSymbol(symbol: string, text: string): string {
   if (!text) return ''
-  const re = new RegExp(`(?:${symbol}[:\\s/])(\\d{1,10})(?:[/\\s]|$)`, 'i')
+  const re = new RegExp(`(?:${symbol}[:\\s/])(\\d{1,16})(?:[/\\s]|$)`, 'i')
   const m = re.exec(text)
   return m ? m[1] : ''
 }
@@ -1485,7 +1485,7 @@ if marker in src:
     print('Patch SKIP: camt053Parser e2e vsNoSep already present', file=sys.stderr)
 else:
     old = "  if (e2e && e2e !== 'NOTPROVIDED') {\n    const vsMatch = e2e.match(/(?:^|\\/)(\d{1,10})(?:\\/|$)/)\n    if (vsMatch) return vsMatch[1]\n    if (/^\\d{1,10}$/.test(e2e.trim())) return e2e.trim()\n  }"
-    new = "  if (e2e && e2e !== 'NOTPROVIDED') {\n    const vsFromE2e = extractSymbol('VS', e2e)\n    if (vsFromE2e) return vsFromE2e\n    // Formát bez oddělovače: ?/VS5408192111/SS/KS nebo /VS12345/\n    const vsNoSep = /(?:^|[/?])VS(\\d{1,10})(?:\\/|$)/i.exec(e2e)\n    if (vsNoSep) return vsNoSep[1]\n    const vsMatch = e2e.match(/(?:^|\\/)(\d{1,10})(?:\\/|$)/)\n    if (vsMatch) return vsMatch[1]\n    if (/^\\d{1,10}$/.test(e2e.trim())) return e2e.trim()\n  }"
+    new = "  if (e2e && e2e !== 'NOTPROVIDED') {\n    const vsFromE2e = extractSymbol('VS', e2e)\n    if (vsFromE2e) return vsFromE2e\n    // Formát bez oddělovače: ?/VS5408192111/SS/KS nebo /VS12345/\n    const vsNoSep = /(?:^|[/?])VS(\\d{1,16})(?:\\/|$)/i.exec(e2e)\n    if (vsNoSep) return vsNoSep[1]\n    const vsMatch = e2e.match(/(?:^|\\/)(\d{1,16})(?:\\/|$)/)\n    if (vsMatch) return vsMatch[1]\n    if (/^\\d{1,16}$/.test(e2e.trim())) return e2e.trim()\n  }"
     if old not in src:
         print('Patch FAIL: camt053Parser e2e vsNoSep — old string not found', file=sys.stderr)
         sys.exit(1)
