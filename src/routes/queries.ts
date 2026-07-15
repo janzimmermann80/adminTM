@@ -4,7 +4,7 @@ import { readFileSync, appendFileSync } from 'node:fs'
 
 // Seznam trvale vyřazených (nechtených) firem — IČO, jedno na řádek.
 // Firmy s IČO v tomto souboru se nezobrazují v "TA adresáři".
-const DISABLED_CINS_FILE = process.env.DISABLED_CINS_FILE ?? '/services/admin-www/others/disabled_cins.txt'
+const DISABLED_CINS_FILE = process.env.DISABLED_CINS_FILE ?? '/Inetpub/wwwroot/administration/others/disabled_cins.txt'
 function getDisabledCins(): string[] {
   try {
     return readFileSync(DISABLED_CINS_FILE, 'utf-8').split('\n').map((s) => s.trim()).filter(Boolean)
