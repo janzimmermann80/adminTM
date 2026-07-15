@@ -23,6 +23,9 @@ bank.db-shm
 bank.db-wal
 data
 
+# Local dev data
+disabled_cins.txt
+
 # Certs
 certs/
 

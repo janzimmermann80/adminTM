@@ -1,5 +1,17 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getUserSql } from '../db/userSql.js'
+import { readFileSync, appendFileSync } from 'node:fs'
+
+// Seznam trvale vyřazených (nechtených) firem — IČO, jedno na řádek.
+// Firmy s IČO v tomto souboru se nezobrazují v "TA adresáři".
+const DISABLED_CINS_FILE = process.env.DISABLED_CINS_FILE ?? '/services/admin-www/others/disabled_cins.txt'
+function getDisabledCins(): string[] {
+  try {
+    return readFileSync(DISABLED_CINS_FILE, 'utf-8').split('\n').map((s) => s.trim()).filter(Boolean)
+  } catch {
+    return []
+  }
+}
 
 // ── ČNB kurz USD → CZK (denní kurz, cache na 1 hodinu) ───────────────────────
 let usdRateCache: { rate: number; ts: number } | null = null
@@ -136,21 +148,37 @@ export async function queriesRoutes(app: FastifyInstance) {
     const { userDb, passwordDb } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     try {
+      const disabledCins = getDisabledCins()
       const rows = await sql`
-        SELECT * FROM (
-          SELECT DISTINCT ON (btrim(AB.cin))
-                 AB.book_key, AB.company_key, AB.company, AB.street, AB.city,
-                 AB.zip, AB.country, btrim(AB.cin) AS cin
-          FROM ta.address_book_base AS AB
-          WHERE AB.country IN ('CZ', 'SK')
-            AND btrim(AB.cin) ~ '^[0-9]{8}$'
-            AND AB.blocked IS NOT TRUE
-            AND NOT EXISTS (
-              SELECT 1 FROM provider.company AS C WHERE btrim(C.cin) = btrim(AB.cin)
-            )
-          ORDER BY btrim(AB.cin), AB.company
-        ) t
-        ORDER BY t.company
+        SELECT D.book_key, D.company_key, D.company, D.street, D.city, D.zip, D.country, D.cin
+        FROM (
+          SELECT Y.*, X.company AS company_our
+          FROM (
+            SELECT
+              max(book_key)     AS book_key,
+              max(company_key)  AS company_key,
+              max(company)      AS company,
+              max(street)       AS street,
+              max(city)         AS city,
+              max(zip)          AS zip,
+              max(country)      AS country,
+              regexp_replace(cin, E'^[\\r\\n\\t ]*|[\\r\\n\\t ]*$', '', 'g') AS cin
+            FROM ta.address_book_base
+            WHERE country IN ('CZ', 'SK')
+              AND cin <> ''
+              AND cin IS NOT NULL
+              AND cin ~ '^[0-9]+$'
+              AND length(cin) < 9
+            GROUP BY cin
+          ) AS Y
+          LEFT JOIN (
+            SELECT company, cin AS cin_our
+            FROM provider.company
+          ) AS X ON trim(Y.cin) = trim(X.cin_our)
+        ) AS D
+        WHERE D.company_our IS NULL
+          ${disabledCins.length > 0 ? sql`AND NOT (D.cin = ANY(${disabledCins}))` : sql``}
+        ORDER BY D.cin
       `
       return reply.send(rows)
     } finally {
@@ -290,25 +318,22 @@ export async function queriesRoutes(app: FastifyInstance) {
     }
   })
 
-  // POST /api/queries/address-book-ban — skryje záznam z nabídky
+  // POST /api/queries/address-book-ban — přidá IČO do seznamu trvale vyřazených firem
   app.post('/address-book-ban', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
-    const { userDb, passwordDb } = (request as any).user
     const body = request.body as {
       company: string; street: string; city: string; zip: string; country: string; cin: string
     }
-    const sql = getUserSql(userDb, passwordDb)
-    try {
-      await sql`
-        UPDATE ta.address_book_base
-        SET blocked = true
-        WHERE cin = ${body.cin}
-          AND btrim(company) = btrim(${body.company})
-      `
-      return reply.send({ ok: true })
-    } finally {
-      await sql.end()
+    const cin = (body.cin ?? '').trim()
+    if (!cin) {
+      return reply.code(400).send({ error: 'Chybí IČO' })
     }
+    try {
+      appendFileSync(DISABLED_CINS_FILE, cin + '\n')
+    } catch (e: any) {
+      return reply.code(500).send({ error: 'Nelze zapsat do seznamu vyřazených firem: ' + (e?.message ?? e) })
+    }
+    return reply.send({ ok: true })
   })
 }
