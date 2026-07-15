@@ -165,10 +165,7 @@ export async function queriesRoutes(app: FastifyInstance) {
               regexp_replace(cin, E'^[\\r\\n\\t ]*|[\\r\\n\\t ]*$', '', 'g') AS cin
             FROM ta.address_book_base
             WHERE country IN ('CZ', 'SK')
-              AND cin <> ''
-              AND cin IS NOT NULL
-              AND cin ~ '^[0-9]+$'
-              AND length(cin) < 9
+              AND regexp_replace(cin, E'^[\\r\\n\\t ]*|[\\r\\n\\t ]*$', '', 'g') ~ '^[0-9]{8}$'
             GROUP BY cin
           ) AS Y
           LEFT JOIN (
