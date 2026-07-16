@@ -10,8 +10,12 @@ services:
       BANK_DB_PATH: /data/bank.db
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
       PRINT_BASE_URL: http://web/new/invoicing
+      # Sdílený soubor vyřazených IČO se starým PHP adminem (reálný host soubor)
+      DISABLED_CINS_FILE: /shared-others/disabled_cins.txt
     volumes:
       - admintm-data:/data
+      # Namapování reálného hostitelského adresáře, kde je disabled_cins.txt (sdíleno s PHP)
+      - /data/www/wwwroot/administration/others:/shared-others
     restart: unless-stopped
 
   web:

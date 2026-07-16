@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getUserSql } from '../db/userSql.js'
-import { readFileSync, appendFileSync, mkdirSync, statSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { readFileSync, appendFileSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 // Seznam trvale vyřazených (nechtených) firem — IČO, jedno na řádek.
 // Firmy s IČO v tomto souboru se nezobrazují v "TA adresáři".
@@ -333,16 +333,6 @@ export async function queriesRoutes(app: FastifyInstance) {
     } catch (e: any) {
       return reply.code(500).send({ error: 'Nelze zapsat do seznamu vyřazených firem: ' + (e?.message ?? e) })
     }
-    // [debug-cins] docasna diagnostika – kam Node skutecne zapsal
-    let dbg: any = { file: DISABLED_CINS_FILE, resolved: resolve(DISABLED_CINS_FILE), cwd: process.cwd() }
-    try {
-      const st = statSync(DISABLED_CINS_FILE)
-      dbg.size = st.size
-      dbg.mtime = st.mtime.toISOString()
-      dbg.lines = getDisabledCins().length
-    } catch (e: any) {
-      dbg.statError = e?.message ?? String(e)
-    }
-    return reply.send({ ok: true, debug: dbg })
+    return reply.send({ ok: true })
   })
 }
