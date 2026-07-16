@@ -404,11 +404,14 @@ export async function bankRoutes(app: FastifyInstance) {
             `
           }
         } else {
+          const amt = q.amount ? Number(q.amount) : null
           rows = await pgSql`
             SELECT p.company_key AS invoice_key, p.*, c.company, c.id AS company_id
             FROM demo.proforma_invoice p
             LEFT JOIN provider.company c ON p.company_key = c.company_key
-            ${searchTerm ? pgSql`WHERE (p.number::text ILIKE ${'%' + searchTerm + '%'} OR c.company ILIKE ${'%' + searchTerm + '%'})` : pgSql``}
+            WHERE TRUE
+              ${searchTerm ? pgSql`AND (p.number::text ILIKE ${'%' + searchTerm + '%'} OR c.company ILIKE ${'%' + searchTerm + '%'})` : pgSql``}
+              ${amt != null ? pgSql`AND ABS(p.curr_total - ${amt}) < 0.01` : pgSql``}
             ORDER BY p.issued DESC
             LIMIT 20
           `

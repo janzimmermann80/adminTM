@@ -12,31 +12,52 @@ import { InvoiceEmailModal } from './company/TabInvoices'
 import { CompanyDetailModal } from '../components/CompanyDetailModal'
 
 // ── Invoice search modal ──────────────────────────────────────────────────────
-function InvoiceSearchModal({ tx, onClose, onMatched, onProformaSaved }: {
+function InvoiceSearchModal({ tx, forceProforma, onClose, onMatched, onProformaSaved }: {
   tx: any
+  forceProforma?: boolean
   onClose: () => void
   onMatched: () => void
   onProformaSaved?: (invoiceKey: number, proformaData: any, companyKey: number) => void
 }) {
-  const isProforma = tx.vs?.charAt(0) === '5'
-  const [q, setQ] = useState(isProforma ? (tx.vs ?? '') : (tx.counterparty_name?.trim() ?? tx.vs ?? ''))
+  const isProforma = forceProforma || tx.vs?.charAt(0) === '5'
+  // U vynuceného hledání zálohy je VS obvykle nevalidní (nezačíná 5) → hledáme podle částky platby,
+  // obsluha může doupřesnit názvem firmy.
+  const [q, setQ] = useState(
+    isProforma
+      ? (forceProforma ? '' : (tx.vs ?? ''))
+      : (tx.counterparty_name?.trim() ?? tx.vs ?? '')
+  )
   const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [invoiceFormTarget, setInvoiceFormTarget] = useState<{ companyKey: number; prefill: any; proformaData?: any } | null>(null)
 
-  const search = async (val: string) => {
-    if (!val.trim()) return
+  const search = async (val: string, byAmount = false): Promise<any[]> => {
+    const term = val.trim()
+    if (!term && !byAmount) return []
     setLoading(true)
     try {
-      const useAmount = !isProforma && /^\d+$/.test(val.trim())
-      const rows = await searchBankInvoices(val, useAmount ? tx.amount : undefined, isProforma)
+      const useAmount = byAmount || (!isProforma && /^\d+$/.test(term))
+      const rows = await searchBankInvoices(term, useAmount ? tx.amount : undefined, isProforma)
       setResults(rows)
-    } catch {}
+      return rows
+    } catch { return [] }
     finally { setLoading(false) }
   }
 
-  useEffect(() => { if (q) search(q) }, [])
+  useEffect(() => {
+    ;(async () => {
+      if (forceProforma) { await search('', true); return }
+      if (q) {
+        const rows = await search(q)
+        // Zálohová platba se starým/nevalidním VS se nedohledá podle VS → fallback na hledání podle částky.
+        if (isProforma && rows.length === 0) {
+          setQ('')
+          await search('', true)
+        }
+      }
+    })()
+  }, [])
 
   const handleMatch = async (invoiceKey: number) => {
     setSaving(true)
@@ -80,8 +101,8 @@ function InvoiceSearchModal({ tx, onClose, onMatched, onProformaSaved }: {
             {results.length === 0 && !loading && (
               <p className="text-sm text-gray-400 py-4 text-center">Žádné výsledky</p>
             )}
-            {results.map(inv => (
-              <div key={inv.invoice_key} className="py-3 space-y-1.5">
+            {results.map((inv, idx) => (
+              <div key={isProforma ? `${inv.invoice_key}-${inv.year ?? ''}-${inv.series ?? ''}-${inv.number ?? ''}-${idx}` : inv.invoice_key} className="py-3 space-y-1.5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <span className="font-mono text-sm font-semibold text-gray-800">{isProforma ? 'Z' : ''}{inv.year}/{inv.number}</span>
@@ -180,7 +201,7 @@ function InvoiceSearchModal({ tx, onClose, onMatched, onProformaSaved }: {
 function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onOpenInvoice, onCreateInvoice }: {
   tx: any
   onUnmatch: (id: number) => void
-  onMatch: (tx: any) => void
+  onMatch: (tx: any, forceProforma?: boolean) => void
   onSettle: (tx: any, invoiceKey?: number) => void
   onOpenCompany: (companyKey: number) => void
   onOpenInvoice: (invoiceKey: number) => void
@@ -267,10 +288,19 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onOpenI
       <td className="px-4 py-2.5 text-right">
         {isMatched ? (
           <button onClick={() => onUnmatch(tx.id)} className="text-xs text-gray-400 hover:text-red-500 transition-colors">Odpárovat</button>
-        ) : proformaResolved ? null : (isProforma && tx.vs_company_key) ? null : (
+        ) : proformaResolved ? null : (isProforma && tx.vs_company_key) ? null : isProforma ? (
           <button onClick={() => onMatch(tx)} className="text-xs bg-teal-600 hover:bg-teal-700 text-white px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap">
-            {isProforma ? 'Najít zálohu' : 'Najít fakturu'}
+            Najít zálohu
           </button>
+        ) : (
+          <div className="flex items-center justify-end gap-1.5">
+            <button onClick={() => onMatch(tx)} className="text-xs bg-teal-600 hover:bg-teal-700 text-white px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap">
+              Najít fakturu
+            </button>
+            <button onClick={() => onMatch(tx, true)} className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap">
+              Najít zálohu
+            </button>
+          </div>
         )}
       </td>
     </tr>
@@ -279,7 +309,7 @@ function StatementRow({ tx, onUnmatch, onMatch, onSettle, onOpenCompany, onOpenI
 
 function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onOpenInvoice, onCreateInvoice, openNewest, onNewestOpened }: {
   onDeleted: () => void
-  onMatch: (tx: any) => void
+  onMatch: (tx: any, forceProforma?: boolean) => void
   onUnmatch: (id: number) => void
   onOpenCompany: (companyKey: number) => void
   onOpenInvoice: (invoiceKey: number) => void
@@ -429,7 +459,7 @@ function StatementsAccordion({ onDeleted, onMatch, onUnmatch, onOpenCompany, onO
                     {(txMap[s.id] ?? []).map(tx => (
                       <StatementRow key={tx.id} tx={tx}
                         onUnmatch={async (id) => { await onUnmatch(id); refreshTx(s.id) }}
-                        onMatch={(tx) => { onMatch(tx) }}
+                        onMatch={(tx, fp) => { onMatch(tx, fp) }}
                         onOpenCompany={onOpenCompany}
                         onOpenInvoice={onOpenInvoice}
                         onCreateInvoice={onCreateInvoice}
@@ -618,7 +648,7 @@ export const Bank = () => {
       <StatementsAccordion
         key={statementsKey}
         onDeleted={() => setStatementsKey(k => k + 1)}
-        onMatch={tx => setMatchTarget(tx)}
+        onMatch={(tx, forceProforma) => setMatchTarget({ tx, forceProforma })}
         onUnmatch={handleUnmatch}
         onOpenCompany={key => setCompanyPanelKey(key)}
         onOpenInvoice={key => setInvoiceDetailKey(key)}
@@ -629,7 +659,8 @@ export const Bank = () => {
 
       {matchTarget && (
         <InvoiceSearchModal
-          tx={matchTarget}
+          tx={matchTarget.tx}
+          forceProforma={matchTarget.forceProforma}
           onClose={() => setMatchTarget(null)}
           onMatched={() => setMatchTarget(null)}
           onProformaSaved={(invoiceKey, proformaData, companyKey) => {
