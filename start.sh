@@ -2296,9 +2296,10 @@ content = """import { FastifyInstance, FastifyRequest, FastifyReply } from 'fast
 import { getUserSql } from '../db/userSql.js'
 import axios from 'axios'
 import iconv from 'iconv-lite'
-import { readFileSync, appendFileSync } from 'fs'
+import { readFileSync, appendFileSync, mkdirSync } from 'fs'
+import { dirname } from 'path'
 
-const DISABLED_CINS_FILE = process.env.DISABLED_CINS_FILE ?? '/Inetpub/wwwroot/administration/others/disabled_cins.txt'
+const DISABLED_CINS_FILE = process.env.DISABLED_CINS_FILE ?? '/data/www/wwwroot/administration/others/disabled_cins.txt'
 const getDisabledCins = (): string[] => {
   try {
     return readFileSync(DISABLED_CINS_FILE, 'utf-8')
