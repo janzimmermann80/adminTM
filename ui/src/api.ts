@@ -102,6 +102,7 @@ export const updateCompany = (id: string, body: Record<string, any>) => put<any>
 export const updateServices = (id: string, body: Record<string, any>) => put<any>(`/companies/${id}/services`, body)
 export const updateInvoiceAddress = (id: string, body: Record<string, any>) =>
   put<any>(`/companies/${id}/invoice-address`, body)
+export const deleteCompany = (id: string) => del<{ ok: true }>(`/companies/${id}`)
 
 // contacts
 export const getContacts = (id: string) => get<{ persons: any[]; contacts: any[]; userAccounts: any[] }>(`/companies/${id}/contacts`)

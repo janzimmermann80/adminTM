@@ -289,6 +289,60 @@ export async function companiesRoutes(app: FastifyInstance) {
     }
   })
 
+  // DELETE /api/companies/:id - smazání firmy (jen naimportované bez vazeb: auta, SIM, zakázky, faktury, objednávky)
+  app.delete('/:id', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+
+    try {
+      const [company] = await sql`SELECT company_key FROM provider.company WHERE company_key = ${id}`
+      if (!company) return reply.code(404).send({ error: 'Firma nenalezena' })
+
+      // Kontrola navázaných dat – mazat lze jen firmu bez vazeb
+      const [deps] = await sql`
+        SELECT
+          (SELECT count(*)::int FROM gps.car_base WHERE company_key = ${id}) AS cars,
+          (SELECT count(*)::int FROM gps.simcard_base WHERE company_key = ${id}) AS sims,
+          (SELECT count(*)::int FROM ta.obligation_base WHERE company_key = ${id}) AS obligations,
+          (SELECT count(*)::int FROM ta.invoice_base WHERE company_key = ${id}) AS invoices,
+          (SELECT count(*)::int FROM ta.order_base WHERE company_key = ${id}) AS orders
+      `
+      const blocking = [
+        deps.cars > 0 ? `vozidla (${deps.cars})` : null,
+        deps.sims > 0 ? `SIM (${deps.sims})` : null,
+        deps.obligations > 0 ? `zakázky (${deps.obligations})` : null,
+        deps.invoices > 0 ? `faktury (${deps.invoices})` : null,
+        deps.orders > 0 ? `objednávky (${deps.orders})` : null,
+      ].filter(Boolean)
+
+      if (blocking.length > 0) {
+        return reply.code(409).send({ error: `Firmu nelze smazat, má navázané záznamy: ${blocking.join(', ')}` })
+      }
+
+      await sql.begin((async (tx: any) => {
+        await tx`DELETE FROM provider.contact WHERE company_key = ${id}`
+        await tx`DELETE FROM provider.contact_person WHERE company_key = ${id}`
+        await tx`DELETE FROM provider.company_invoice_address WHERE company_key = ${id}`
+        await tx`DELETE FROM provider.company_detail WHERE company_key = ${id}`
+        await tx`DELETE FROM provider.company WHERE company_key = ${id}`
+      }) as any)
+
+      return reply.send({ ok: true })
+    } catch (err: any) {
+      // FK violation – firma je navázaná jinde než kontrolujeme
+      if (err?.code === '23503') {
+        return reply.code(409).send({ error: 'Firmu nelze smazat, má navázané záznamy v databázi.' })
+      }
+      request.log.error(err)
+      return reply.code(500).send({ error: 'Chyba při mazání firmy' })
+    } finally {
+      await sql.end()
+    }
+  })
+
   // GET /api/companies/:id/contacts - contact persons + contacts
   app.get('/:id/contacts', {
     onRequest: [(app as any).authenticate],

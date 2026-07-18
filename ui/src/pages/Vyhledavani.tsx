@@ -3,7 +3,7 @@ import { Layout } from '../components/Layout'
 import { Spinner } from '../components/Spinner'
 import { Pagination } from '../components/Pagination'
 import { CompanyDetailModal } from '../components/CompanyDetailModal'
-import { search, getSearchMeta } from '../api'
+import { search, getSearchMeta, deleteCompany } from '../api'
 import { formatDate } from '../utils'
 import type { SearchMeta } from '../types'
 
@@ -263,6 +263,7 @@ export const Vyhledavani = () => {
   const [error, setError] = useState('')
   const [searched, setSearched] = useState(false)
   const [order, setOrder] = useState<string>('company')
+  const [deletingKey, setDeletingKey] = useState<string | null>(null)
   const firstRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -330,6 +331,21 @@ export const Vyhledavani = () => {
   const handlePage = (newOffset: number) => {
     doSearch(newOffset, 'contains')
     window.scrollTo(0, 0)
+  }
+
+  const handleDelete = async (c: any) => {
+    if (!window.confirm(`Opravdu smazat firmu „${c.company}“? Tuto akci nelze vrátit zpět.`)) return
+    setDeletingKey(c.company_key)
+    setError('')
+    try {
+      await deleteCompany(c.company_key)
+      setResults(prev => prev.filter(r => r.company_key !== c.company_key))
+      setTotal(prev => Math.max(0, prev - 1))
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setDeletingKey(null)
+    }
   }
 
   const thCls = (col: string) =>
@@ -569,6 +585,7 @@ export const Vyhledavani = () => {
                   <th className={thCls('region') + ' hidden xl:table-cell'} onClick={() => sortBy('region')}>Oblast<SortArrow col="region" /></th>
                   <th className={thCls('tariff') + ' hidden lg:table-cell'} onClick={() => sortBy('tariff')}>Tarif<SortArrow col="tariff" /></th>
                   <th className={thCls('last_modif') + ' hidden xl:table-cell'} onClick={() => sortBy('last_modif')}>Změna<SortArrow col="last_modif" /></th>
+                  <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Akce</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -599,11 +616,28 @@ export const Vyhledavani = () => {
                         : c.tariff ? <span className="text-gray-400 text-xs">{c.tariff}</span> : null}
                     </td>
                     <td className="px-3 py-2 text-gray-400 hidden xl:table-cell text-xs">{formatDate(c.last_modif)}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        title="Smazat firmu"
+                        disabled={deletingKey === c.company_key}
+                        onClick={e => { e.stopPropagation(); handleDelete(c) }}
+                        className="text-gray-400 hover:text-red-600 disabled:opacity-40 disabled:cursor-not-allowed p-1 rounded hover:bg-red-50 transition-colors"
+                      >
+                        {deletingKey === c.company_key
+                          ? <Spinner size={4} />
+                          : (
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          )}
+                      </button>
+                    </td>
                   </tr>
                 ))}
                 {results.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center text-gray-400">Žádné výsledky</td>
+                    <td colSpan={10} className="px-4 py-12 text-center text-gray-400">Žádné výsledky</td>
                   </tr>
                 )}
               </tbody>
