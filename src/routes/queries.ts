@@ -293,20 +293,30 @@ export async function queriesRoutes(app: FastifyInstance) {
     }
     const sql = getUserSql(userDb, passwordDb)
     try {
-      if (body.cin && body.cin.trim()) {
+      // Oříznutí na délky sloupců provider.company (jinak PostgresError 22001)
+      const cut = (v: string | undefined, n: number) => (v ?? '').trim().slice(0, n)
+      const company = cut(body.company, 40)
+      const street = cut(body.street, 40)
+      const city = cut(body.city, 40)
+      const country = cut(body.country, 3)
+      const cin = cut(body.cin, 15)
+      const zip = cut(body.zip, 6)
+      const region = cut(body.region, 3) || '00'
+      const tariff = cut(body.tariff, 2) || '51'
+      if (cin) {
         const existing = await sql`
-          SELECT company_key, id, company FROM provider.company WHERE cin = ${body.cin}
+          SELECT company_key, id, company FROM provider.company WHERE cin = ${cin}
         `
         if (existing.length > 0) {
           return reply.code(409).send({ error: 'Firma s tímto IČO již existuje', existing: existing[0] })
         }
       }
-      const now = new Date().toLocaleDateString('cs-CZ')
+      const now = new Date()
       const [newCompany] = await sql`
         INSERT INTO provider.company (provider, company, city, country, cin, tin, last_modif, street, zip, region, tariff)
-        VALUES (${provider}, ${body.company}, ${body.city ?? ''}, ${body.country ?? ''},
-                ${body.cin ?? ''}, '', ${now}, ${body.street ?? ''},
-                ${body.zip ?? ''}, ${body.region ?? '00'}, ${body.tariff ?? '51'})
+        VALUES (${provider}, ${company}, ${city}, ${country},
+                ${cin}, '', ${now}, ${street},
+                ${zip}, ${region}, ${tariff})
         RETURNING company_key, id
       `
       await sql`INSERT INTO provider.company_detail (company_key) VALUES (${newCompany.company_key})`
