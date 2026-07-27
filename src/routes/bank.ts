@@ -473,22 +473,66 @@ async function resolveProformaCompanyKeys(pgSql: any, transactions: any[]): Prom
   return map
 }
 
-// Faktura vystavená k záloze: provider.invoice.proforma_number = parseInt(tx.vs).
+// Faktura vystavená k záloze.
+// Pozor na dva formáty VS zálohy:
+//   - nový (zkrácený):  '5' + series + proforma.number                      (bez company id)
+//   - starý (plný):     '5' + series + RIGHT(company.id,5) + proforma.number
+// provider.invoice.proforma_number je ale VŽDY uloženo v "plném" tvaru. Proto z VS
+// nejdřív dohledáme proformu (company.id + number) a zrekonstruujeme kanonické
+// proforma_number, podle kterého teprve hledáme vystavenou fakturu.
 // Vrací mapu vs -> { invoice_key, number, year, settlement, company_key, company }.
 async function resolveProformaIssuedInvoices(pgSql: any, transactions: any[]): Promise<Record<string, any>> {
   const map: Record<string, any> = {}
   const proformaVs = [...new Set(
-    transactions.filter(t => t.vs && String(t.vs).charAt(0) === '5' && String(t.vs).length >= 8).map(t => String(t.vs))
+    transactions.filter(t => t.vs && String(t.vs).charAt(0) === '5').map(t => String(t.vs))
   )]
-  const vsNums = [...new Set(proformaVs.map(vs => parseInt(vs)).filter(n => !isNaN(n)))]
-  if (vsNums.length === 0) return map
+
+  const canonicalByVs: Record<string, string> = {}
+  for (const vs of proformaVs) {
+    if (!/^5\d{2,}$/.test(vs)) continue
+    const series = Number(vs[1])
+    // Nový formát: '5' + series + number
+    let [pf] = await pgSql`
+      SELECT p.number, RIGHT(c.id::text, 5) AS comp5
+      FROM demo.proforma_invoice p
+      JOIN provider.company c ON c.company_key = p.company_key
+      WHERE p.series = ${series} AND p.number = ${Number(vs.slice(2))}
+      ORDER BY p.issued DESC
+      LIMIT 1
+    `
+    // Fallback starý formát: '5' + series + comp5 + number
+    if (!pf && vs.length >= 8) {
+      const comp5 = vs.slice(2, 7)
+      const number = Number(vs.slice(7))
+      ;[pf] = await pgSql`
+        SELECT p.number, RIGHT(c.id::text, 5) AS comp5
+        FROM demo.proforma_invoice p
+        JOIN provider.company c ON c.company_key = p.company_key
+        WHERE p.series = ${series} AND RIGHT(c.id::text, 5) = ${comp5} AND p.number = ${number}
+        ORDER BY p.issued DESC
+        LIMIT 1
+      `
+    }
+    if (pf) canonicalByVs[vs] = `5${series}${pf.comp5}${pf.number}`
+  }
+
+  const canonicalNums = [...new Set(
+    Object.values(canonicalByVs).map(s => Number(s)).filter(n => Number.isSafeInteger(n))
+  )]
+  if (canonicalNums.length === 0) return map
+
   const invoices = await pgSql`
     SELECT i.invoice_key, i.number, i.year, i.settlement, i.company_key, i.proforma_number, c.company
     FROM provider.invoice i
     LEFT JOIN provider.company c ON i.company_key = c.company_key
-    WHERE i.proforma_number = ANY(${vsNums}) AND i.cancellation IS NULL
+    WHERE i.proforma_number = ANY(${canonicalNums}) AND i.cancellation IS NULL
   `
-  for (const inv of invoices) map[String(inv.proforma_number)] = inv
+  const byProformaNum: Record<string, any> = {}
+  for (const inv of invoices) byProformaNum[String(inv.proforma_number)] = inv
+  for (const vs of Object.keys(canonicalByVs)) {
+    const inv = byProformaNum[canonicalByVs[vs]]
+    if (inv) map[vs] = inv
+  }
   return map
 }
 

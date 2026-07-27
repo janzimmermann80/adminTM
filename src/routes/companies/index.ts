@@ -232,7 +232,9 @@ export async function companiesRoutes(app: FastifyInstance) {
         }
       }
 
-      const now = new Date().toLocaleDateString('cs-CZ')
+      // last_modif je timestamp — bindujeme Date objekt (postgres.js serializuje správně).
+      // NE toLocaleDateString('cs-CZ') → "27. 7. 2026" je neplatné pro timestamp (Invalid time value).
+      const now = new Date()
 
       const [newCompany] = await sql`
         INSERT INTO provider.company (provider, company, city, country, cin, tin, last_modif, street, zip, region, tariff)
@@ -263,7 +265,9 @@ export async function companiesRoutes(app: FastifyInstance) {
       account?: string; branch?: string; tariff?: string; region?: string
     }
 
-    const now = new Date().toLocaleDateString('cs-CZ')
+    // last_modif je timestamp — bindujeme Date objekt (postgres.js serializuje správně).
+    // NE toLocaleDateString('cs-CZ') → "27. 7. 2026" je neplatné pro timestamp (Invalid time value).
+    const now = new Date()
 
     try {
       await sql`

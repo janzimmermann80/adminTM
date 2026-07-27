@@ -142,9 +142,11 @@ export const TabInfo = ({ company, onReload }: Props) => {
   }
 
   const changeTariff = async (val: string) => {
-    setTariff(val); setTariffSaving(true)
+    const prev = tariff
+    setTariff(val); setTariffSaving(true); setError('')
     try { await updateCompany(String(company.company_key), { tariff: val }); onReload() }
-    catch {} finally { setTariffSaving(false) }
+    catch (e: any) { setTariff(prev); setError(e?.message ?? 'Nepodařilo se uložit tarif') }
+    finally { setTariffSaving(false) }
   }
 
   const saveBasic = async () => {
