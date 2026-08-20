@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Spinner } from '../../components/Spinner'
-import { getCompany, getCompanySummary, createDiaryEntry, getContacts, getImpersonateUrl, getDiaryEmployees } from '../../api'
+import { getCompany, getCompanySummary, createDiaryEntry, getContacts, getImpersonateUrl, getDiaryEmployees, generateCompanyId, removeCompanyId } from '../../api'
 import { formatDate } from '../../utils'
 import { useAuth } from '../../context/AuthContext'
 import type { CompanyDetail as ICompanyDetail } from '../../types'
@@ -50,6 +50,7 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
   const [tab, setTab] = useState(initialTab)
   const [orphanAccounts, setOrphanAccounts] = useState<any[]>([])
   const [impersonating, setImpersonating] = useState<string | null>(null)
+  const [idBusy, setIdBusy] = useState(false)
 
   // Přidání záznamu do deníku
   const [diaryOpen, setDiaryOpen]   = useState(false)
@@ -107,6 +108,26 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
       setCompany(data)
     } catch (e: any) {
       setError(e.message)
+    }
+  }
+
+  const handleToggleId = async () => {
+    if (!company) return
+    const hasId = Boolean(company.id)
+    const msg = hasId
+      ? `Opravdu chcete smazat ID „${company.id}"?`
+      : 'Opravdu chcete přidělit nové ID?'
+    if (!window.confirm(msg)) return
+    setIdBusy(true)
+    setError('')
+    try {
+      if (hasId) await removeCompanyId(companyKey)
+      else await generateCompanyId(companyKey)
+      await reload()
+    } catch (e: any) {
+      setError(e?.message ?? 'Operace se nezdařila')
+    } finally {
+      setIdBusy(false)
     }
   }
 
@@ -170,6 +191,22 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
             <h1 className="text-2xl font-bold text-gray-900 flex items-baseline gap-3 flex-wrap">
               <span>{company.company}</span>
               <span className="text-gray-400">{company.id}</span>
+              <button
+                onClick={handleToggleId}
+                disabled={idBusy}
+                title={company.id ? 'Smazat ID' : 'Přidělit ID'}
+                className="self-center p-1 rounded-lg text-gray-300 hover:text-[#0a6b6b] hover:bg-teal-50 transition-colors disabled:opacity-50"
+              >
+                {idBusy ? <Spinner size={4} /> : company.id ? (
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" />
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                  </svg>
+                )}
+              </button>
               {company.admittance_date && (() => {
                 const valid = company.admittance_date >= new Date().toISOString().slice(0, 10)
                 return (

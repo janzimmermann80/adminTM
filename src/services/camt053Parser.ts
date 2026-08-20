@@ -5,7 +5,6 @@
 import { XMLParser } from 'fast-xml-parser'
 
 export interface ParsedStatement {
-  seqNumber: number | null
   accountIban: string
   accountNumber: string
   periodFrom: string
@@ -58,11 +57,6 @@ export function parseCamt053(xmlContent: string): ParsedStatement {
 
   if (!stmt) throw new Error('Neplatný CAMT.053 XML — element Stmt nenalezen')
 
-  // Pořadové číslo výpisu (dle banky)
-  const seqNumber: number | null = stmt['ElctrncSeqNb'] != null
-    ? Number(stmt['ElctrncSeqNb'])
-    : stmt['LglSeqNb'] != null ? Number(stmt['LglSeqNb']) : null
-
   // Účet
   const acctId = stmt['Acct']?.['Id']
   const accountIban: string = acctId?.['IBAN'] ?? acctId?.['Othr']?.['Id'] ?? ''
@@ -95,7 +89,6 @@ export function parseCamt053(xmlContent: string): ParsedStatement {
   const transactions: ParsedTransaction[] = entries.map((ntry: any) => parseEntry(ntry, currency))
 
   return {
-    seqNumber,
     accountIban,
     accountNumber,
     periodFrom,
@@ -188,11 +181,11 @@ function extractVs(refs: any, addtlInfo: string, strdRefs: string[], rmtUstrd: s
     const vsFromE2e = extractSymbol('VS', e2e)
     if (vsFromE2e) return vsFromE2e
     // Formát bez oddělovače: ?/VS5408192111/SS/KS nebo /VS12345/
-    const vsNoSep = /(?:^|[/?])VS(\d{1,16})(?:\/|$)/i.exec(e2e)
+    const vsNoSep = /(?:^|[/?])VS(\d{1,10})(?:\/|$)/i.exec(e2e)
     if (vsNoSep) return vsNoSep[1]
-    const vsMatch = e2e.match(/(?:^|\/)(\d{1,16})(?:\/|$)/)
+    const vsMatch = e2e.match(/(?:^|\/)(\d{1,10})(?:\/|$)/)
     if (vsMatch) return vsMatch[1]
-    if (/^\d{1,16}$/.test(e2e.trim())) return e2e.trim()
+    if (/^\d{1,10}$/.test(e2e.trim())) return e2e.trim()
   }
 
   // 3. AddtlTxInf — formát "VS:12345 KS:..." nebo "VS 12345"
@@ -208,7 +201,7 @@ function extractVs(refs: any, addtlInfo: string, strdRefs: string[], rmtUstrd: s
   //    (např. "FAKTURA 8001919101", "PLATBA-12345", "SPZ ABC 5400278241").
   for (const src of [e2e, rmtUstrd]) {
     if (!src) continue
-    const matches = src.match(/\d{4,16}/g)
+    const matches = src.match(/\d{4,10}/g)
     if (matches && matches.length) {
       // Nejdelší (při shodě délky poslední) — reálné VS bývá 8–10 číslic,
       // zatímco parazitní čísla (SPZ, letopočet) jsou kratší.
@@ -222,7 +215,7 @@ function extractVs(refs: any, addtlInfo: string, strdRefs: string[], rmtUstrd: s
 function extractSymbol(symbol: string, text: string): string {
   if (!text) return ''
   // Formáty: "VS:12345", "VS 12345", "/VS12345/"
-  const re = new RegExp(`(?:${symbol}[:\\s/])(\\d{1,16})(?:[/\\s]|$)`, 'i')
+  const re = new RegExp(`(?:${symbol}[:\\s/])(\\d{1,10})(?:[/\\s]|$)`, 'i')
   const m = re.exec(text)
   return m ? m[1] : ''
 }

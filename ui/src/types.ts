@@ -127,6 +127,7 @@ export interface Vehicle {
   export_requested?: boolean
   driver_key?: number | null
   driver2_key?: number | null
+  person_key?: number | null
   stazka_certified?: boolean
   home_stand_key?: number | null
   home_stand_name?: string | null

@@ -293,6 +293,45 @@ export async function companiesRoutes(app: FastifyInstance) {
     }
   })
 
+  // POST /api/companies/:id/generate-id — přidělí firmě volné ID (provider.genid)
+  app.post('/:id/generate-id', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb, provider } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    try {
+      const [row] = await sql`
+        UPDATE provider.company
+        SET id = provider.genid(${provider}), last_modif = ${new Date()}
+        WHERE company_key = ${id}
+        RETURNING id
+      `
+      if (!row) return reply.code(404).send({ error: 'Firma nenalezena' })
+      return reply.send({ success: true, id: row.id })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // DELETE /api/companies/:id/id — odebere firmě ID (nastaví NULL)
+  app.delete('/:id/id', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+    try {
+      await sql`
+        UPDATE provider.company SET id = NULL, last_modif = ${new Date()}
+        WHERE company_key = ${id}
+      `
+      return reply.send({ success: true })
+    } finally {
+      await sql.end()
+    }
+  })
+
   // DELETE /api/companies/:id - smazání firmy (jen naimportované bez vazeb: auta, SIM, zakázky, faktury, objednávky)
   app.delete('/:id', {
     onRequest: [(app as any).authenticate],
@@ -507,7 +546,7 @@ export async function companiesRoutes(app: FastifyInstance) {
       const rows = await sql`
         SELECT C.car_key, C.spz, C.make, NOT C.inactive AS active, C.production_year,
                C.tonnage, C.capacity, C.axles, C.euro_emission, C.length, C.width, C.height,
-               C.sim_imsi, C.export_allowed, C.driver_key, C.driver2_key,
+               C.sim_imsi, C.export_allowed, C.driver_key, C.driver2_key, C.person_key,
                C.stazka_certified, C.home_stand_key,
                M.name AS home_stand_name, M.zip AS home_stand_zip, M.country AS home_stand_country
         FROM gps.car_base C
@@ -559,6 +598,7 @@ export async function companiesRoutes(app: FastifyInstance) {
       spz?: string; make?: string; tonnage?: number | null; capacity?: number | null
       euro_emission?: string | null; axles?: number | null; active?: boolean
       stazka_certified?: boolean; home_stand_key?: number | null
+      driver_key?: number | null; driver2_key?: number | null; sim_imsi?: string | null; person_key?: number | null
     }
 
     try {
@@ -572,7 +612,11 @@ export async function companiesRoutes(app: FastifyInstance) {
           axles             = ${body.axles !== undefined ? body.axles : sql`axles`},
           inactive          = ${body.active !== undefined ? !body.active : sql`inactive`},
           stazka_certified  = ${body.stazka_certified !== undefined ? body.stazka_certified : sql`stazka_certified`},
-          home_stand_key    = ${body.home_stand_key !== undefined ? body.home_stand_key : sql`home_stand_key`}
+          home_stand_key    = ${body.home_stand_key !== undefined ? body.home_stand_key : sql`home_stand_key`},
+          driver_key        = ${body.driver_key !== undefined ? body.driver_key : sql`driver_key`},
+          driver2_key       = ${body.driver2_key !== undefined ? body.driver2_key : sql`driver2_key`},
+          sim_imsi          = ${body.sim_imsi !== undefined ? body.sim_imsi : sql`sim_imsi`},
+          person_key        = ${body.person_key !== undefined ? body.person_key : sql`person_key`}
         WHERE car_key = ${vid}
       `
       return reply.send({ success: true })
@@ -647,7 +691,7 @@ export async function companiesRoutes(app: FastifyInstance) {
     const { userDb, passwordDb } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     const { did } = request.params as { id: string; did: string }
-    const body = request.body as { name?: string; phone?: string; active?: boolean; wage_km?: number | null; wage_hourly?: number | null; currency?: string }
+    const body = request.body as { name?: string; phone?: string; active?: boolean; adr?: boolean; wage_km?: number | null; wage_hourly?: number | null; currency?: string }
 
     try {
       await sql`
@@ -655,6 +699,7 @@ export async function companiesRoutes(app: FastifyInstance) {
           name        = COALESCE(${body.name ?? null}, name),
           phone       = COALESCE(${body.phone ?? null}, phone),
           active      = COALESCE(${body.active ?? null}, active),
+          adr         = COALESCE(${body.adr ?? null}, adr),
           wage_km     = ${body.wage_km !== undefined ? body.wage_km : sql`wage_km`},
           wage_hourly = ${body.wage_hourly !== undefined ? body.wage_hourly : sql`wage_hourly`},
           currency    = COALESCE(${body.currency ?? null}, currency)
@@ -1113,16 +1158,18 @@ export async function companiesRoutes(app: FastifyInstance) {
       price?: number | null
       our_sim?: boolean
       ie_disabled?: boolean
+      serial_number?: string | null
     }
 
     try {
       await sql`
         UPDATE gps.simcard_base SET
-          imsi        = COALESCE(${body.imsi ?? null}, imsi),
-          number      = COALESCE(${body.number ?? null}, number),
-          price       = ${body.price !== undefined ? body.price : sql`price`},
-          our_sim     = COALESCE(${body.our_sim ?? null}, our_sim),
-          ie_disabled = COALESCE(${body.ie_disabled ?? null}, ie_disabled)
+          imsi          = COALESCE(${body.imsi ?? null}, imsi),
+          number        = COALESCE(${body.number ?? null}, number),
+          price         = ${body.price !== undefined ? body.price : sql`price`},
+          our_sim       = COALESCE(${body.our_sim ?? null}, our_sim),
+          ie_disabled   = COALESCE(${body.ie_disabled ?? null}, ie_disabled),
+          serial_number = ${body.serial_number !== undefined ? body.serial_number : sql`serial_number`}
         WHERE imsi = ${imsi} AND company_key = ${id}
       `
       return reply.send({ success: true })
@@ -1191,10 +1238,13 @@ export async function companiesRoutes(app: FastifyInstance) {
 
       const rows = await sql`
         SELECT S.service_key, S.time, S.descr, S.code,
+               S.pos_gps, S.type, S.price, S.liter,
+               C.name AS city_name,
                D.name AS driver_name
         FROM gps.service_base S
+        LEFT JOIN map.city C ON S.city_key = C.city_key
         LEFT JOIN gps.driver_base D ON S.driver_key = D.driver_key
-        WHERE S.car_key = ${cars[0].car_key} AND S.code = 'TST'
+        WHERE S.car_key = ${cars[0].car_key} AND TRIM(S.code) = 'TST'
         ORDER BY S.time DESC
         LIMIT ${limit}
       `

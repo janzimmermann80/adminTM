@@ -80,6 +80,13 @@ export const getStatsDiaryByOwner = () => get<any[]>('/statistics/diary-by-owner
 export const getStatsLentMonthly = () => get<any[]>('/statistics/lent-monthly')
 export const getStatsOrdersMonthly = () => get<any[]>('/statistics/orders-monthly')
 export const getStatsLentAccessStats = () => get<any>('/statistics/lent-access-stats')
+export const getStatsLentCompanies = (params: { status?: 'active' | 'inactive'; month?: string; trial?: boolean } = {}) => {
+  const p = new URLSearchParams()
+  if (params.status)            p.set('status', params.status)
+  if (params.month)             p.set('month', params.month)
+  if (params.trial !== undefined) p.set('trial', String(params.trial))
+  return get<any[]>(`/statistics/lent-companies?${p}`)
+}
 export const getStatsOrderBaseMonthly   = () => get<any[]>('/statistics/order-base-monthly')
 export const getStatsInvoiceBaseMonthly = () => get<any[]>('/statistics/invoice-base-monthly')
 export const getDiaryUpcoming = (initials: string) =>
@@ -103,6 +110,8 @@ export const updateServices = (id: string, body: Record<string, any>) => put<any
 export const updateInvoiceAddress = (id: string, body: Record<string, any>) =>
   put<any>(`/companies/${id}/invoice-address`, body)
 export const deleteCompany = (id: string) => del<{ ok: true }>(`/companies/${id}`)
+export const generateCompanyId = (id: string) => post<{ success: boolean; id: string }>(`/companies/${id}/generate-id`, {})
+export const removeCompanyId = (id: string) => del<{ success: boolean }>(`/companies/${id}/id`)
 
 // contacts
 export const getContacts = (id: string) => get<{ persons: any[]; contacts: any[]; userAccounts: any[] }>(`/companies/${id}/contacts`)

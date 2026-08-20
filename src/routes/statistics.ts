@@ -38,11 +38,13 @@ export async function statisticsRoutes(app: FastifyInstance) {
           ORDER BY count DESC
           LIMIT 15
         `,
-        // Aktivní firmy s platným přístupem (admittance_date v budoucnu)
+        // Aktivní firmy s platným přístupem (admittance_date v budoucnu) — rozděleno dle tarifu
         sql`
-          SELECT count(*)::int AS count
-          FROM provider.company_detail
-          WHERE admittance_date >= CURRENT_DATE
+          SELECT count(*)::int AS count,
+                 count(*) FILTER (WHERE C.tariff = '15')::int AS trial
+          FROM provider.company_detail AS D
+          JOIN provider.company AS C ON C.company_key = D.company_key
+          WHERE D.admittance_date >= CURRENT_DATE
         `,
         // Nové smlouvy tento měsíc
         sql`
@@ -107,6 +109,8 @@ export async function statisticsRoutes(app: FastifyInstance) {
       return reply.send({
         companies_by_tariff: companies,
         active_companies: activeCompanies[0]?.count ?? 0,
+        active_companies_trial: activeCompanies[0]?.trial ?? 0,
+        active_companies_paid: (activeCompanies[0]?.count ?? 0) - (activeCompanies[0]?.trial ?? 0),
         new_contracts_this_month: contracts[0]?.count ?? 0,
         invoices_this_year: invoices[0] ?? { count: 0, total_sum: 0 },
         overdue_claims: claims[0] ?? { count: 0, total_sum: 0 },
@@ -317,19 +321,68 @@ export async function statisticsRoutes(app: FastifyInstance) {
     const { userDb, passwordDb } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     try {
+      // active = přístup do budoucna (admittance_date >= dnes);
+      // active_trial = aktivní s tarifem Zkušební (15), active_paid = ostatní aktivní
       const rows = await sql`
-        SELECT to_char(prog_lent_date, 'YYYY-MM') AS month, count(*)::int AS count
-        FROM provider.company_detail
-        WHERE prog_lent_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
-          AND prog_lent_date <= CURRENT_DATE
+        SELECT to_char(D.prog_lent_date, 'YYYY-MM') AS month,
+               count(*)::int AS count,
+               count(*) FILTER (WHERE D.admittance_date >= CURRENT_DATE)::int AS active,
+               count(*) FILTER (WHERE D.admittance_date >= CURRENT_DATE AND C.tariff = '15')::int AS active_trial
+        FROM provider.company_detail AS D
+        JOIN provider.company AS C ON C.company_key = D.company_key
+        WHERE D.prog_lent_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+          AND D.prog_lent_date <= CURRENT_DATE
         GROUP BY 1
         ORDER BY 1
       `
       const result = fill36Months(
-        rows.map((r: any) => ({ month: r.month, count: r.count })),
-        (month) => ({ month, count: 0 }),
+        rows.map((r: any) => ({ month: r.month, count: r.count, active: r.active, active_trial: r.active_trial })),
+        (month) => ({ month, count: 0, active: 0, active_trial: 0 }),
       )
       return reply.send(result)
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/statistics/lent-companies — seznam registrovaných firem (36 měsíců) s příznakem aktivního přístupu
+  // ?status=active|inactive (výchozí = všechny), ?month=YYYY-MM (omezí na měsíc registrace),
+  // ?trial=true (jen aktivní s tarifem Zkušební 15) / ?trial=false (aktivní ostatní)
+  app.get('/lent-companies', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const q = request.query as { status?: string; month?: string; trial?: string }
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const monthFilter = q.month && /^\d{4}-\d{2}$/.test(q.month)
+        ? sql`AND to_char(D.prog_lent_date, 'YYYY-MM') = ${q.month}`
+        : sql``
+      const statusFilter = q.status === 'active'
+        ? sql`AND D.admittance_date >= CURRENT_DATE`
+        : q.status === 'inactive'
+          ? sql`AND (D.admittance_date IS NULL OR D.admittance_date < CURRENT_DATE)`
+          : sql``
+      const trialFilter = q.trial === 'true'
+        ? sql`AND C.tariff = '15'`
+        : q.trial === 'false'
+          ? sql`AND C.tariff IS DISTINCT FROM '15'`
+          : sql``
+      const rows = await sql`
+        SELECT C.company_key, C.id, C.company, C.city, C.country, C.tariff,
+               to_char(D.prog_lent_date, 'YYYY-MM') AS month,
+               D.prog_lent_date, D.admittance_date,
+               (D.admittance_date >= CURRENT_DATE) AS active
+        FROM provider.company_detail AS D
+        JOIN provider.company AS C ON C.company_key = D.company_key
+        WHERE D.prog_lent_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+          AND D.prog_lent_date <= CURRENT_DATE
+          ${monthFilter}
+          ${statusFilter}
+          ${trialFilter}
+        ORDER BY D.prog_lent_date DESC, C.company
+      `
+      return reply.send(rows)
     } finally {
       await sql.end()
     }
@@ -426,19 +479,23 @@ export async function statisticsRoutes(app: FastifyInstance) {
     const { userDb, passwordDb } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     try {
+      // Vydané faktury rozdělené dle země uživatele (provider.company.country):
+      // SK = country='SK', CZ = vše ostatní (zachová součet i pro chybějící/jiné země).
       const rows = await sql`
-        SELECT to_char(issued, 'YYYY-MM') AS month,
-               count(*) FILTER (WHERE type = 'I')::int AS issued,
-               count(*) FILTER (WHERE type = 'R')::int AS received
-        FROM ta.invoice_base
-        WHERE issued >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
-          AND issued <= CURRENT_DATE
+        SELECT to_char(ib.issued, 'YYYY-MM') AS month,
+               count(*) FILTER (WHERE ib.type = 'I' AND c.country = 'SK')::int AS issued_sk,
+               count(*) FILTER (WHERE ib.type = 'I' AND c.country IS DISTINCT FROM 'SK')::int AS issued_cz,
+               count(*) FILTER (WHERE ib.type = 'R')::int AS received
+        FROM ta.invoice_base AS ib
+        LEFT JOIN provider.company AS c ON c.company_key = ib.company_key
+        WHERE ib.issued >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+          AND ib.issued <= CURRENT_DATE
         GROUP BY 1
         ORDER BY 1
       `
       const result = fill36Months(
-        rows.map((r: any) => ({ month: r.month, issued: r.issued, received: r.received })),
-        (month) => ({ month, issued: 0, received: 0 }),
+        rows.map((r: any) => ({ month: r.month, issued_cz: r.issued_cz, issued_sk: r.issued_sk, received: r.received })),
+        (month) => ({ month, issued_cz: 0, issued_sk: 0, received: 0 }),
       )
       return reply.send(result)
     } finally {

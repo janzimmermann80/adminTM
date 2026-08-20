@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getVehicles, getDrivers, getSimcards, addVehicle, updateVehicle, deleteVehicle, addDriver, updateDriver, deleteDriver, getSimcardTariffs, addSimcard, updateSimcard, deleteSimcard, getSimcardUploadLog, getSimcardServiceData } from '../../api'
+import { getVehicles, getDrivers, getSimcards, addVehicle, updateVehicle, deleteVehicle, addDriver, updateDriver, deleteDriver, getSimcardTariffs, addSimcard, updateSimcard, deleteSimcard, getSimcardUploadLog, getSimcardServiceData, getContacts } from '../../api'
 import { Spinner } from '../../components/Spinner'
 import { formatNumber } from '../../utils'
 import type { Vehicle, Driver, SimCard } from '../../types'
@@ -71,6 +71,7 @@ const emptyForm = (): FormData => ({
   export_requested: false,
   driver_key: null,
   driver2_key: null,
+  person_key: null,
   stazka_certified: false,
   home_stand_key: null,
 })
@@ -100,6 +101,7 @@ const vehicleToForm = (v: Vehicle): FormData => ({
   export_requested: v.export_requested ?? false,
   driver_key: v.driver_key ?? null,
   driver2_key: v.driver2_key ?? null,
+  person_key: v.person_key ?? null,
   stazka_certified: v.stazka_certified ?? false,
   home_stand_key: v.home_stand_key ?? null,
 })
@@ -324,12 +326,15 @@ interface VehicleRowProps {
   vehicle: Vehicle
   drivers: Driver[]
   simcards: SimCard[]
+  persons: { person_key: number; name: string }[]
   companyKey: string
   onUpdated: (v: Vehicle) => void
   onDeleted: (carKey: number) => void
+  highlighted?: boolean
+  onGoToSim?: (imsi: string) => void
 }
 
-const VehicleRow = ({ vehicle: v, drivers, simcards, companyKey, onUpdated, onDeleted }: VehicleRowProps) => {
+const VehicleRow = ({ vehicle: v, drivers, simcards, persons, companyKey, onUpdated, onDeleted, highlighted, onGoToSim }: VehicleRowProps) => {
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState<FormData>(vehicleToForm(v))
   const [saving, setSaving] = useState(false)
@@ -337,6 +342,7 @@ const VehicleRow = ({ vehicle: v, drivers, simcards, companyKey, onUpdated, onDe
 
   const driverMap = Object.fromEntries(drivers.map(d => [d.driver_key, d.name]))
   const simMap = Object.fromEntries(simcards.map(s => [s.imsi, s.number ?? s.imsi]))
+  const personMap = Object.fromEntries(persons.map(p => [p.person_key, p.name]))
 
   const typeLabel = VEHICLE_TYPES.find(t => t.value === v.type)?.label
 
@@ -369,8 +375,28 @@ const VehicleRow = ({ vehicle: v, drivers, simcards, companyKey, onUpdated, onDe
     }
   }
 
+  const handleQuickSave = async (patch: Partial<FormData>) => {
+    const next = { ...form, ...patch }
+    setForm(next)
+    setSaving(true)
+    setError('')
+    try {
+      await updateVehicle(companyKey, String(v.car_key), { ...next, active: next.active, inactive: !next.active })
+      onUpdated({ ...v, ...next })
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const activeDriverOpts = drivers.filter(d => d.active)
+  // placeholder světlejší, když není vybraná hodnota (nesplývá se zadanými hodnotami)
+  const selCls = 'border border-gray-300 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-[#0a6b6b] bg-white max-w-[10rem] truncate'
+  const selColor = (empty: boolean) => empty ? ' text-gray-400' : ' text-gray-900'
+
   return (
-    <div className={`border rounded-xl px-4 py-3 ${v.active ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'}`}>
+    <div id={`car-${v.car_key}`} className={`border rounded-xl px-4 py-3 transition-shadow ${v.active ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'} ${highlighted ? 'ring-2 ring-[#0a6b6b] shadow-md' : ''}`}>
       {/* Summary row */}
       <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setOpen(o => !o); setForm(vehicleToForm(v)); setError('') }}>
         <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${v.active ? 'bg-teal-100' : 'bg-gray-200'}`}>
@@ -379,20 +405,54 @@ const VehicleRow = ({ vehicle: v, drivers, simcards, companyKey, onUpdated, onDe
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16V6a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h1m8-1a1 1 0 01-1 1H9m4-1V8a1 1 0 011-1h2.586a1 1 0 01.707.293l3.414 3.414a1 1 0 01.293.707V16a1 1 0 01-1 1h-1m-6-1a1 1 0 001 1h1M5 17a2 2 0 104 0m-4 0a2 2 0 114 0m6 0a2 2 0 104 0m-4 0a2 2 0 114 0" />
           </svg>
         </div>
-        <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-          <span className="font-bold text-gray-900 font-mono text-sm w-24 flex-shrink-0">{v.spz}</span>
-          <span className="text-sm text-gray-600 w-36 truncate" title={v.driver_key ? (driverMap[v.driver_key] ?? `#${v.driver_key}`) : ''}>
-            {v.driver_key ? (driverMap[v.driver_key] ?? `#${v.driver_key}`) : <span className="text-gray-300">—</span>}
-          </span>
-          <span className="text-sm text-gray-600 w-36 truncate hidden sm:block" title={v.driver2_key ? (driverMap[v.driver2_key] ?? `#${v.driver2_key}`) : ''}>
-            {v.driver2_key ? (driverMap[v.driver2_key] ?? `#${v.driver2_key}`) : <span className="text-gray-300">—</span>}
-          </span>
-          <span className="text-sm text-gray-600 font-mono w-28 truncate hidden md:block">
-            {v.sim_imsi ? (simMap[v.sim_imsi] ?? v.sim_imsi) : <span className="text-gray-300">—</span>}
-          </span>
+        <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap" onClick={e => e.stopPropagation()}>
+          <span className="font-bold text-gray-900 font-mono text-sm w-24 flex-shrink-0 cursor-pointer" onClick={() => { setOpen(o => !o); setForm(vehicleToForm(v)) }}>{v.spz}</span>
+          <select className={selCls + selColor(!form.driver_key)} value={form.driver_key ?? ''} disabled={saving}
+            onChange={e => handleQuickSave({ driver_key: e.target.value ? parseInt(e.target.value) : null })}>
+            <option value="">Řidič 1…</option>
+            {activeDriverOpts.map(d => <option key={d.driver_key} value={d.driver_key}>{d.name}</option>)}
+            {form.driver_key && !activeDriverOpts.find(d => d.driver_key === form.driver_key) && (
+              <option value={form.driver_key}>{driverMap[form.driver_key] ?? `#${form.driver_key}`}</option>
+            )}
+          </select>
+          <select className={selCls + selColor(!form.driver2_key)} value={form.driver2_key ?? ''} disabled={saving}
+            onChange={e => handleQuickSave({ driver2_key: e.target.value ? parseInt(e.target.value) : null })}>
+            <option value="">Řidič 2…</option>
+            {activeDriverOpts.map(d => <option key={d.driver_key} value={d.driver_key}>{d.name}</option>)}
+            {form.driver2_key && !activeDriverOpts.find(d => d.driver_key === form.driver2_key) && (
+              <option value={form.driver2_key}>{driverMap[form.driver2_key] ?? `#${form.driver2_key}`}</option>
+            )}
+          </select>
+          <select className={selCls + ' font-mono' + selColor(!form.sim_imsi)} value={form.sim_imsi ?? ''} disabled={saving}
+            onChange={e => handleQuickSave({ sim_imsi: e.target.value || null })}>
+            <option value="">SIM…</option>
+            {simcards.map(s => (
+              <option key={s.imsi} value={s.imsi} style={s.our_sim ? { color: '#1d4ed8', fontWeight: 600 } : undefined}>
+                {s.number ? `${s.number}` : s.imsi}{s.our_sim ? ' ●' : ''}
+              </option>
+            ))}
+          </select>
+          <select className={selCls + selColor(!form.person_key)} value={form.person_key ?? ''} disabled={saving}
+            onChange={e => handleQuickSave({ person_key: e.target.value ? parseInt(e.target.value) : null })}>
+            <option value="">Dispečer…</option>
+            {persons.map(p => <option key={p.person_key} value={p.person_key}>{p.name}</option>)}
+            {form.person_key && !persons.find(p => p.person_key === form.person_key) && (
+              <option value={form.person_key}>{personMap[form.person_key] ?? `#${form.person_key}`}</option>
+            )}
+          </select>
+          <label className="flex items-center gap-1 text-xs text-gray-700 cursor-pointer select-none" onClick={e => e.stopPropagation()}>
+            <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-[#0a6b6b] focus:ring-[#0a6b6b]"
+              checked={!!form.stazka_certified} disabled={saving}
+              onChange={e => handleQuickSave({ stazka_certified: e.target.checked })} />
+            Stažka
+          </label>
+          <label className="flex items-center gap-1 text-xs text-gray-700 cursor-pointer select-none" onClick={e => e.stopPropagation()}>
+            <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-[#0a6b6b] focus:ring-[#0a6b6b]"
+              checked={!!form.active} disabled={saving}
+              onChange={e => handleQuickSave({ active: e.target.checked })} />
+            Aktivní
+          </label>
           <div className="flex gap-1 flex-wrap">
-            {!v.active && <Badge color="red">Neaktivní</Badge>}
-            {v.stazka_certified && <Badge color="green">Stažka</Badge>}
             {v.export_allowed && <Badge color="blue">Export</Badge>}
             {v.adr && <Badge color="yellow">ADR {v.adr}</Badge>}
           </div>
@@ -569,17 +629,18 @@ interface DriverRowProps {
 }
 
 const DriverRow = ({ driver: d, companyKey, onUpdated, onDeleted }: DriverRowProps) => {
-  const [open, setOpen] = useState(false)
   const [form, setForm] = useState<DriverFormData>(driverToForm(d))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  const dirty = JSON.stringify(form) !== JSON.stringify(driverToForm(d))
 
   const handleSave = async () => {
     setSaving(true); setError('')
     try {
       await updateDriver(companyKey, String(d.driver_key), form)
       onUpdated({ ...d, ...form })
-      setOpen(false)
     } catch (e: any) { setError(e.message) }
     finally { setSaving(false) }
   }
@@ -592,37 +653,44 @@ const DriverRow = ({ driver: d, companyKey, onUpdated, onDeleted }: DriverRowPro
     } catch (e: any) { setError(e.message); setSaving(false) }
   }
 
+  const inp = 'border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#0a6b6b] focus:border-[#0a6b6b] bg-white'
+
   return (
-    <div className={`border rounded-xl px-4 py-3 ${d.active ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'}`}>
-      <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setOpen(o => !o); setForm(driverToForm(d)); setError('') }}>
-        <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${d.active ? 'bg-teal-100' : 'bg-gray-200'}`}>
-          <svg className={`w-4 h-4 ${d.active ? 'text-[#0a6b6b]' : 'text-gray-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
+    <div className={`border rounded-lg px-3 py-2 ${d.active ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'}`}>
+      {error && <div className="mb-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">{error}</div>}
+      <div className="flex flex-wrap items-center gap-2">
+        <input className={inp + ' flex-1 min-w-[160px]'} value={form.name} placeholder="Jméno"
+          onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+        <input className={inp + ' w-40 font-mono'} value={form.phone} placeholder="Telefon"
+          onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+        <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none">
+          <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-[#0a6b6b] focus:ring-[#0a6b6b]"
+            checked={form.active} onChange={e => setForm(f => ({ ...f, active: e.target.checked }))} />
+          Aktivní
+        </label>
+        <div className="flex items-center gap-1 ml-auto">
+          {dirty && (
+            <button onClick={handleSave} disabled={saving || !form.name.trim()}
+              className="px-2.5 py-1 rounded bg-[#0a6b6b] text-white text-xs font-medium hover:bg-[#0d8080] disabled:opacity-50">
+              {saving ? '…' : 'Uložit'}
+            </button>
+          )}
+          {confirmDelete ? (
+            <>
+              <span className="text-xs text-red-600">Opravdu?</span>
+              <button onClick={handleDelete} className="px-2 py-1 rounded bg-red-600 text-white text-xs hover:bg-red-700">Smazat</button>
+              <button onClick={() => setConfirmDelete(false)} className="px-2 py-1 rounded border border-gray-300 text-xs">Ne</button>
+            </>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} title="Smazat řidiče"
+              className="p-1 rounded text-gray-300 hover:text-red-600 hover:bg-red-50 transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" />
+              </svg>
+            </button>
+          )}
         </div>
-        <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-          <span className="font-bold text-gray-900 text-sm w-40 truncate">{d.name}</span>
-          <span className="text-sm text-gray-600 font-mono w-36 truncate hidden sm:block">{d.phone || <span className="text-gray-300">—</span>}</span>
-          <span className="text-sm text-gray-500 hidden md:block">
-            {d.wage_km != null ? `${formatNumber(d.wage_km, 2)} ${d.currency ?? 'CZK'}/km` : ''}
-            {d.wage_km != null && d.wage_hourly != null ? ' · ' : ''}
-            {d.wage_hourly != null ? `${formatNumber(d.wage_hourly, 2)} ${d.currency ?? 'CZK'}/h` : ''}
-          </span>
-          <div className="flex gap-1">
-            {!d.active && <Badge color="red">Neaktivní</Badge>}
-            {d.adr && <Badge color="yellow">ADR</Badge>}
-          </div>
-        </div>
-        <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
       </div>
-      {error && <div className="mt-2 text-sm text-red-600">{error}</div>}
-      {open && (
-        <DriverEditForm form={form} saving={saving} isNew={false}
-          onChange={p => setForm(f => ({ ...f, ...p }))}
-          onSave={handleSave} onCancel={() => setOpen(false)} onDelete={handleDelete} />
-      )}
     </div>
   )
 }
@@ -778,10 +846,10 @@ const FMT_DT = (s: string) => {
     d.toLocaleTimeString('cs-CZ', { hour: '2-digit', minute: '2-digit' })
 }
 
-interface SimLogProps { companyKey: string; imsi: string }
+interface SimLogProps { companyKey: string; imsi: string; initialTab?: 'uploads' | 'service' }
 
-const SimLog = ({ companyKey, imsi }: SimLogProps) => {
-  const [tab, setTab] = useState<'uploads' | 'service'>('uploads')
+const SimLog = ({ companyKey, imsi, initialTab = 'uploads' }: SimLogProps) => {
+  const [tab, setTab] = useState<'uploads' | 'service'>(initialTab)
   const [uploads, setUploads] = useState<any[] | null>(null)
   const [service, setService] = useState<any[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -809,7 +877,10 @@ const SimLog = ({ companyKey, imsi }: SimLogProps) => {
     else loadService()
   }
 
-  useEffect(() => { loadUploads() }, [])
+  useEffect(() => { if (initialTab === 'service') loadService(); else loadUploads() }, [])
+
+  // reaguj na změnu initialTab zvenčí (přepnutí Přenosy/Běh tlačítkem v řádku)
+  useEffect(() => { setTab(initialTab); if (initialTab === 'service') loadService(); else loadUploads() }, [initialTab])
 
   const tabCls = (t: typeof tab) =>
     `px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${tab === t ? 'bg-[#0a6b6b] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`
@@ -917,28 +988,24 @@ const SimLog = ({ companyKey, imsi }: SimLogProps) => {
 interface SimRowProps {
   sim: SimCard; companyKey: string; tariffs: { tariff: string; name: string }[]
   onUpdated: (s: SimCard) => void; onDeleted: (imsi: string) => void
+  highlighted?: boolean
+  onGoToVehicle?: (carKey: number) => void
 }
 
-const SimRow = ({ sim: s, companyKey, tariffs, onUpdated, onDeleted }: SimRowProps) => {
-  const [open, setOpen] = useState(false)
-  const [editOpen, setEditOpen] = useState(false)
+const SimRow = ({ sim: s, companyKey, tariffs, onUpdated, onDeleted, highlighted, onGoToVehicle }: SimRowProps) => {
   const [form, setForm] = useState<SimFormData>(simToForm(s))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [logTab, setLogTab] = useState<'uploads' | 'service' | null>(null)
 
-  const openEdit = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setForm(simToForm(s))
-    setError('')
-    setEditOpen(true)
-  }
+  const dirty = JSON.stringify(form) !== JSON.stringify(simToForm(s))
 
   const handleSave = async () => {
     setSaving(true); setError('')
     try {
       await updateSimcard(companyKey, s.imsi, form)
       onUpdated({ ...s, ...form })
-      setEditOpen(false)
     } catch (e: any) { setError(e.message) }
     finally { setSaving(false) }
   }
@@ -951,60 +1018,71 @@ const SimRow = ({ sim: s, companyKey, tariffs, onUpdated, onDeleted }: SimRowPro
     } catch (e: any) { setError(e.message); setSaving(false) }
   }
 
-  return (
-    <>
-      <div className="border rounded-xl px-4 py-3 border-gray-200 bg-white">
-        <div className="flex items-center gap-3">
-          {/* accordion toggle — click on the info area */}
-          <div className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer" onClick={() => setOpen(o => !o)}>
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 bg-teal-100">
-              <svg className="w-4 h-4 text-[#0a6b6b]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <div className="flex-1 min-w-0 flex items-center gap-3 flex-wrap">
-              <span className="font-mono text-sm text-gray-900 w-40 truncate">{s.number || s.imsi}</span>
-              <span className="font-mono text-xs text-gray-400 w-40 truncate hidden sm:block">{s.imsi}</span>
-              <span className="text-sm text-gray-500 hidden md:block">{s.tariff_name ?? s.tariff ?? '—'}</span>
-              {s.spz && <Badge color="blue">{s.spz}</Badge>}
-              {s.our_sim && <Badge color="green">Naše SIM</Badge>}
-              {s.ie_disabled && <Badge color="red">IE off</Badge>}
-            </div>
-            <svg className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          {/* edit button */}
-          <button onClick={openEdit} className="p-1.5 rounded-lg text-gray-400 hover:text-[#0a6b6b] hover:bg-teal-50 transition-colors flex-shrink-0" title="Upravit">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 11l6.586-6.586a2 2 0 112.828 2.828L11.828 13.828A2 2 0 0110 14H8v-2a2 2 0 01.586-1.414z" />
-            </svg>
-          </button>
-        </div>
-        {open && <SimLog companyKey={companyKey} imsi={s.imsi} />}
-      </div>
+  const toggleLog = () => setLogTab(cur => (cur === null ? 'uploads' : null))
 
-      {/* Edit modal */}
-      {editOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setEditOpen(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-              <h2 className="font-semibold text-gray-900">Upravit SIM — <span className="font-mono text-[#0a6b6b]">{s.number || s.imsi}</span></h2>
-              <button onClick={() => setEditOpen(false)} className="text-gray-400 hover:text-gray-600">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="px-6 py-4">
-              {error && <div className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</div>}
-              <SimEditForm form={form} saving={saving} isNew={false} tariffs={tariffs}
-                onChange={p => setForm(f => ({ ...f, ...p }))}
-                onSave={handleSave} onCancel={() => setEditOpen(false)} onDelete={handleDelete} />
-            </div>
-          </div>
+  const inp = 'border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-[#0a6b6b] focus:border-[#0a6b6b] bg-white'
+
+  return (
+    <div id={`sim-${s.imsi}`} className={`border rounded-lg px-3 py-2 border-gray-200 bg-white transition-shadow ${highlighted ? 'ring-2 ring-[#0a6b6b] shadow-md' : ''}`}>
+      {error && <div className="mb-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">{error}</div>}
+      <div className="flex flex-wrap items-center gap-2">
+        <input className={inp + ' w-36 font-mono'} value={form.number} placeholder="Tel. číslo"
+          onChange={e => setForm(f => ({ ...f, number: e.target.value }))} />
+        <input className={inp + ' w-44 font-mono text-xs'} value={form.imsi} placeholder="IMSI"
+          onChange={e => setForm(f => ({ ...f, imsi: e.target.value }))} />
+        <input className={inp + ' w-56 font-mono text-xs'} placeholder="Sériové číslo" value={form.serial_number ?? ''}
+          onChange={e => setForm(f => ({ ...f, serial_number: e.target.value || null }))} />
+        <input className={inp + ' w-20'} type="number" step="0.01" placeholder="Cena" value={form.price ?? ''}
+          onChange={e => { const n = e.target.value === '' ? null : parseFloat(e.target.value); setForm(f => ({ ...f, price: isNaN(n as number) ? null : n })) }} />
+        <label className="flex items-center gap-1.5 text-xs text-gray-700 cursor-pointer select-none">
+          <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-[#0a6b6b] focus:ring-[#0a6b6b]"
+            checked={form.our_sim} onChange={e => setForm(f => ({ ...f, our_sim: e.target.checked }))} />
+          Naše
+        </label>
+        <button
+          onClick={toggleLog}
+          title="Zobrazit/skrýt logy (přenosy a běh TM)"
+          className={`px-2 py-1 rounded text-xs font-medium transition-colors ${logTab !== null ? 'bg-[#0a6b6b] text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+        >
+          Logy
+        </button>
+        {s.spz && s.car_key != null ? (
+          <button
+            onClick={() => onGoToVehicle?.(s.car_key!)}
+            title={`Přejít na vozidlo ${s.spz}`}
+            className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 text-xs font-medium hover:bg-blue-200 transition-colors"
+          >
+            {s.spz}
+          </button>
+        ) : s.spz ? (
+          <Badge color="blue">{s.spz}</Badge>
+        ) : null}
+        {s.ie_disabled && <Badge color="red">IE off</Badge>}
+        <div className="flex items-center gap-1 ml-auto">
+          {dirty && (
+            <button onClick={handleSave} disabled={saving}
+              className="px-2.5 py-1 rounded bg-[#0a6b6b] text-white text-xs font-medium hover:bg-[#0d8080] disabled:opacity-50">
+              {saving ? '…' : 'Uložit'}
+            </button>
+          )}
+          {confirmDelete ? (
+            <>
+              <span className="text-xs text-red-600">Opravdu?</span>
+              <button onClick={handleDelete} className="px-2 py-1 rounded bg-red-600 text-white text-xs hover:bg-red-700">Smazat</button>
+              <button onClick={() => setConfirmDelete(false)} className="px-2 py-1 rounded border border-gray-300 text-xs">Ne</button>
+            </>
+          ) : (
+            <button onClick={() => setConfirmDelete(true)} title="Smazat SIM"
+              className="p-1 rounded text-gray-300 hover:text-red-600 hover:bg-red-50 transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16" />
+              </svg>
+            </button>
+          )}
         </div>
-      )}
-    </>
+      </div>
+      {logTab && <SimLog companyKey={companyKey} imsi={s.imsi} initialTab={logTab} />}
+    </div>
   )
 }
 
@@ -1055,10 +1133,12 @@ export const TabVehicles = ({ companyKey }: Props) => {
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
   const [drivers, setDrivers] = useState<Driver[]>([])
   const [simcards, setSimcards] = useState<SimCard[]>([])
+  const [persons, setPersons] = useState<{ person_key: number; name: string }[]>([])
   const [tariffs, setTariffs] = useState<{ tariff: string; name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [activeSection, setActiveSection] = useState<'vehicles' | 'drivers' | 'sims'>('vehicles')
+  const [highlight, setHighlight] = useState<string | null>(null) // imsi nebo car_key pro zvýraznění
   const [showInactive, setShowInactive] = useState(false)
   const [addingNew, setAddingNew] = useState(false)
   const [showInactiveDrivers, setShowInactiveDrivers] = useState(false)
@@ -1071,11 +1151,13 @@ export const TabVehicles = ({ companyKey }: Props) => {
       getDrivers(companyKey),
       getSimcards(companyKey),
       getSimcardTariffs(companyKey),
-    ]).then(([v, d, s, t]) => {
+      getContacts(companyKey).then(c => c?.persons ?? []).catch(() => []),
+    ]).then(([v, d, s, t, p]) => {
       setVehicles(v)
       setDrivers(d)
       setSimcards(s)
       setTariffs(t)
+      setPersons(p)
     }).catch(e => setError(e.message))
     .finally(() => setLoading(false))
   }, [companyKey])
@@ -1087,14 +1169,34 @@ export const TabVehicles = ({ companyKey }: Props) => {
   const activeDrivers = drivers.filter(d => d.active)
   const inactiveDrivers = drivers.filter(d => !d.active)
 
+  // proklik vozidlo → SIM (přepne na SIM karty a zvýrazní danou SIM)
+  const goToSim = (imsi: string) => {
+    setActiveSection('sims')
+    setHighlight(imsi)
+    setTimeout(() => {
+      document.getElementById(`sim-${imsi}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 50)
+  }
+  // proklik SIM → vozidlo (přepne na Vozidla a zvýrazní auto s touto SIM)
+  const goToVehicle = (carKey: number | null | undefined) => {
+    if (carKey == null) return
+    const v = vehicles.find(x => x.car_key === carKey)
+    if (v && !v.active) setShowInactive(true)
+    setActiveSection('vehicles')
+    setHighlight(String(carKey))
+    setTimeout(() => {
+      document.getElementById(`car-${carKey}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 50)
+  }
+
   return (
     <div>
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>}
 
       {/* Section switcher */}
       <div className="flex gap-2 mb-5 flex-wrap">
-        <Section title="Vozidla" k="vehicles" current={activeSection} count={vehicles.length} onClick={() => setActiveSection('vehicles')} />
-        <Section title="Řidiči" k="drivers" current={activeSection} count={drivers.length} onClick={() => setActiveSection('drivers')} />
+        <Section title="Vozidla" k="vehicles" current={activeSection} count={activeVehicles.length} onClick={() => setActiveSection('vehicles')} />
+        <Section title="Řidiči" k="drivers" current={activeSection} count={activeDrivers.length} onClick={() => setActiveSection('drivers')} />
         <Section title="SIM karty" k="sims" current={activeSection} count={simcards.length} onClick={() => setActiveSection('sims')} />
       </div>
 
@@ -1134,7 +1236,10 @@ export const TabVehicles = ({ companyKey }: Props) => {
               vehicle={v}
               drivers={drivers}
               simcards={simcards}
+              persons={persons}
               companyKey={companyKey}
+              highlighted={highlight === String(v.car_key)}
+              onGoToSim={goToSim}
               onUpdated={updated => setVehicles(vs => vs.map(x => x.car_key === updated.car_key ? updated : x))}
               onDeleted={key => setVehicles(vs => vs.filter(x => x.car_key !== key))}
             />
@@ -1160,7 +1265,10 @@ export const TabVehicles = ({ companyKey }: Props) => {
                       vehicle={v}
                       drivers={drivers}
                       simcards={simcards}
+                      persons={persons}
                       companyKey={companyKey}
+                      highlighted={highlight === String(v.car_key)}
+                      onGoToSim={goToSim}
                       onUpdated={updated => setVehicles(vs => vs.map(x => x.car_key === updated.car_key ? updated : x))}
                       onDeleted={key => setVehicles(vs => vs.filter(x => x.car_key !== key))}
                     />
@@ -1196,23 +1304,15 @@ export const TabVehicles = ({ companyKey }: Props) => {
               onDeleted={key => setDrivers(ds => ds.filter(x => x.driver_key !== key))} />
           ))}
           {inactiveDrivers.length > 0 && (
-            <div className="mt-2">
-              <button onClick={() => setShowInactiveDrivers(s => !s)}
-                className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 py-1">
-                <svg className={`w-4 h-4 transition-transform ${showInactiveDrivers ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-                Neaktivní řidiči ({inactiveDrivers.length})
-              </button>
-              {showInactiveDrivers && (
-                <div className="mt-2 space-y-2">
-                  {inactiveDrivers.map(d => (
-                    <DriverRow key={d.driver_key} driver={d} companyKey={companyKey}
-                      onUpdated={upd => setDrivers(ds => ds.map(x => x.driver_key === upd.driver_key ? upd : x))}
-                      onDeleted={key => setDrivers(ds => ds.filter(x => x.driver_key !== key))} />
-                  ))}
-                </div>
-              )}
+            <div className="mt-3">
+              <p className="text-xs text-gray-400 uppercase tracking-wide font-medium mb-2">Neaktivní ({inactiveDrivers.length})</p>
+              <div className="space-y-2">
+                {inactiveDrivers.map(d => (
+                  <DriverRow key={d.driver_key} driver={d} companyKey={companyKey}
+                    onUpdated={upd => setDrivers(ds => ds.map(x => x.driver_key === upd.driver_key ? upd : x))}
+                    onDeleted={key => setDrivers(ds => ds.filter(x => x.driver_key !== key))} />
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -1238,6 +1338,8 @@ export const TabVehicles = ({ companyKey }: Props) => {
           )}
           {simcards.map(s => (
             <SimRow key={s.imsi} sim={s} companyKey={companyKey} tariffs={tariffs}
+              highlighted={highlight === s.imsi}
+              onGoToVehicle={goToVehicle}
               onUpdated={upd => setSimcards(ss => ss.map(x => x.imsi === upd.imsi ? upd : x))}
               onDeleted={imsi => setSimcards(ss => ss.filter(x => x.imsi !== imsi))} />
           ))}

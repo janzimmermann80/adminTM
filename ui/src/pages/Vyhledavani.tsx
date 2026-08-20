@@ -276,11 +276,11 @@ export const Vyhledavani = () => {
   const f = (k: keyof FilterForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setFilter(prev => ({ ...prev, [k]: e.target.value }))
 
-  const buildParams = (off: number, matchMode: 'contains' | 'begins' | 'selecting') => {
+  const buildParams = (off: number, matchMode: 'contains' | 'begins' | 'selecting', orderOverride?: string) => {
     const p: Record<string, string | number | undefined> = {
       limit: LIMIT,
       offset: off,
-      order,
+      order: orderOverride ?? order,
     }
     if (matchMode === 'contains' || matchMode === 'begins') {
       let val = text[text.sort as keyof TextForm] as string
@@ -312,12 +312,12 @@ export const Vyhledavani = () => {
     return p
   }
 
-  const doSearch = async (off: number, mode: 'contains' | 'begins' | 'selecting') => {
+  const doSearch = async (off: number, mode: 'contains' | 'begins' | 'selecting', orderOverride?: string) => {
     setLoading(true)
     setError('')
     setSearched(true)
     try {
-      const res = await search(buildParams(off, mode))
+      const res = await search(buildParams(off, mode, orderOverride))
       setResults(res.data)
       setTotal(res.total)
       setOffset(off)
@@ -353,6 +353,8 @@ export const Vyhledavani = () => {
 
   const sortBy = (col: string) => {
     setOrder(col)
+    // po zmene razeni hned znovu nacist data (zachovat aktualni stranku)
+    if (searched) doSearch(offset, 'contains', col)
   }
 
   const SortArrow = ({ col }: { col: string }) =>
