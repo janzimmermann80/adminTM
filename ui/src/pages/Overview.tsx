@@ -54,7 +54,7 @@ const Tile = ({
 const LentChart = ({ data, onSelect, selected }: {
   data: { month: string; count: number; active: number; active_trial: number }[]
   onSelect?: (month: string, status: 'trial' | 'paid' | 'inactive') => void
-  selected?: { month: string; status: 'trial' | 'paid' | 'inactive' } | null
+  selected?: { month: string; status: 'trial' | 'paid' | 'inactive' | 'active' } | null
 }) => {
   if (data.length === 0) return <div className="h-24 flex items-center justify-center text-sm text-gray-400">Načítání…</div>
 
