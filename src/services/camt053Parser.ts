@@ -12,6 +12,7 @@ export interface ParsedStatement {
   openingBalance: number
   closingBalance: number
   currency: string
+  seqNumber?: number | null
   transactions: ParsedTransaction[]
 }
 
