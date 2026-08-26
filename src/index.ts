@@ -18,6 +18,7 @@ import { chatRoutes } from './routes/chat.js'
 import { bankRoutes } from './routes/bank.js'
 import { queriesRoutes } from './routes/queries.js'
 import { workersRoutes } from './routes/workers.js'
+import { importsRoutes } from './routes/imports.js'
 
 const app = Fastify({ logger: true })
 
@@ -73,6 +74,7 @@ await app.register(chatRoutes, { prefix: '/api/chat' })
 await app.register(bankRoutes, { prefix: '/api/bank' })
 await app.register(queriesRoutes, { prefix: '/api/queries' })
 await app.register(workersRoutes, { prefix: '/api/workers' })
+await app.register(importsRoutes, { prefix: '/api/imports' })
 
 // Health check
 app.get('/health', async () => ({ status: 'ok' }))

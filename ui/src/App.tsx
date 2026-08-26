@@ -12,6 +12,7 @@ import { Bank } from './pages/Bank'
 import { Statistics } from './pages/Statistics'
 import { Queries } from './pages/Queries'
 import { Fakturace } from './pages/Fakturace'
+import { Imports } from './pages/Imports'
 import { Spinner } from './components/Spinner'
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
@@ -37,6 +38,7 @@ const AppRoutes = () => (
     <Route path="/statistics" element={<ProtectedRoute><Statistics /></ProtectedRoute>} />
     <Route path="/invoicing" element={<ProtectedRoute><Fakturace /></ProtectedRoute>} />
     <Route path="/queries" element={<ProtectedRoute><Queries /></ProtectedRoute>} />
+    <Route path="/imports" element={<ProtectedRoute><Imports /></ProtectedRoute>} />
     <Route path="/" element={<Navigate to="/overview" replace />} />
     <Route path="*" element={<Navigate to="/overview" replace />} />
   </Routes>
