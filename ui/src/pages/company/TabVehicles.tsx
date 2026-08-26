@@ -452,6 +452,15 @@ const VehicleRow = ({ vehicle: v, drivers, simcards, persons, companyKey, onUpda
               onChange={e => handleQuickSave({ active: e.target.checked })} />
             Aktivní
           </label>
+          {form.sim_imsi && (
+            <button
+              onClick={() => onGoToSim?.(form.sim_imsi!)}
+              title={`Přejít na SIM ${simMap[form.sim_imsi] ?? form.sim_imsi}`}
+              className="inline-flex items-center rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 text-xs font-medium hover:bg-blue-200 transition-colors"
+            >
+              SIM
+            </button>
+          )}
           <div className="flex gap-1 flex-wrap">
             {v.export_allowed && <Badge color="blue">Export</Badge>}
             {v.adr && <Badge color="yellow">ADR {v.adr}</Badge>}
