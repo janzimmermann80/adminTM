@@ -38,6 +38,8 @@ export interface CompanyDetail extends Company {
   prog_sent_date?: string
   prog_lent?: string
   prog_lent_date?: string
+  prog_purchased?: string
+  prog_purchased_date?: string
   admittance?: string
   admittance_date?: string
   forwarding?: string
@@ -45,6 +47,7 @@ export interface CompanyDetail extends Company {
   car_pool?: string
   car_pool_date?: string
   claim_exchange?: string
+  claim_exchange_date?: string
   advert_discount?: number
   show_date?: string
   send_emails_from_their_domain?: boolean
