@@ -33,10 +33,12 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
   const [newPerson, setNewPerson] = useState({ name: '', sex: 'M', send_offers: false })
 
   const [editKey, setEditKey] = useState<number | null>(null)
+  const [editAdminKey, setEditAdminKey] = useState<string | null>(null)
   const [editData, setEditData] = useState<RowEdit | null>(null)
 
   const [smsTarget, setSmsTarget] = useState<{ gsm: string; name: string } | null>(null)
   const [emailTarget, setEmailTarget] = useState<string | null>(null)
+  const [accessTarget, setAccessTarget] = useState<{ email: string; username: string; password: string } | null>(null)
   const [impersonating, setImpersonating] = useState<string | null>(null)
 
   const handleImpersonate = async (type: string, username: string) => {
@@ -67,11 +69,12 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
 
   useEffect(() => { load() }, [companyKey])
 
-  const startEdit = (person: ContactPerson, pContacts: Contact[], account: any) => {
-    setEditKey(person.person_key)
+  const startEdit = (person: ContactPerson | null, pContacts: Contact[], account: any) => {
+    setEditKey(person?.person_key ?? null)
+    setEditAdminKey(person == null ? account?.username ?? null : null)
     setEditData({
-      name: person.name,
-      sex: person.sex,
+      name: person?.name ?? '',
+      sex: person?.sex ?? 'M',
       mobiles: pContacts.filter(c => c.type === 'G').map(c => ({ contact_key: c.contact_key, value: c.value })),
       emails: pContacts.filter(c => c.type === 'E').map(c => ({ contact_key: c.contact_key, value: c.value })),
       newMobile: '',
@@ -82,12 +85,12 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
     })
   }
 
-  const handleSave = async (person: ContactPerson) => {
+  const handleSave = async (person: ContactPerson | null) => {
     if (!editData) return
     setSaving(true)
     try {
       // Osoba
-      await updatePerson(companyKey, String(person.person_key), { name: editData.name, sex: editData.sex })
+      if (person) await updatePerson(companyKey, String(person.person_key), { name: editData.name, sex: editData.sex })
       // Kontakty — update existujících
       for (const m of editData.mobiles) {
         if (m.value.trim()) await updateContact(companyKey, String(m.contact_key), { value: m.value })
@@ -99,13 +102,16 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
       }
       // Nové kontakty
       if (editData.newMobile.trim())
-        await addContact(companyKey, { type: 'G', value: editData.newMobile, importance: person.importance, send_tips: false, forward_tm: false })
+        await addContact(companyKey, { type: 'G', value: editData.newMobile, importance: person?.importance ?? null, send_tips: false, forward_tm: false })
       if (editData.newEmail.trim())
-        await addContact(companyKey, { type: 'E', value: editData.newEmail, importance: person.importance, send_tips: false, forward_tm: false })
-      // Účet
-      if (editData.username.trim())
-        await upsertUserAccount(companyKey, { username: editData.username, password: editData.password, username_old: editData.usernameOld || undefined, person_key: person.person_key })
+        await addContact(companyKey, { type: 'E', value: editData.newEmail, importance: person?.importance ?? null, send_tips: false, forward_tm: false })
+      // Účet — prázdný username s existujícím účtem = smazání
+      if (editData.usernameOld && !editData.username.trim())
+        await upsertUserAccount(companyKey, { username: '', password: '', username_old: editData.usernameOld })
+      else if (editData.username.trim())
+        await upsertUserAccount(companyKey, { username: editData.username, password: editData.password, username_old: editData.usernameOld || undefined, person_key: person?.person_key ?? null })
       setEditKey(null)
+      setEditAdminKey(null)
       setEditData(null)
       await load()
     } catch (e: any) { setError(e.message) }
@@ -151,28 +157,44 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
   }
 
   const inputCls = 'border border-gray-300 rounded-lg px-2 py-1 text-sm focus:ring-2 focus:ring-teal-500 outline-none w-full'
-  const inputRoCls = 'border border-transparent rounded-lg px-2 py-1 text-sm bg-transparent outline-none w-full cursor-pointer'
   const thCls = 'text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-3 py-2'
 
   if (loading) return <div className="flex justify-center py-12"><Spinner size={8} /></div>
 
-  const contactsByImportance = contacts.reduce((acc, c) => {
-    const k = c.importance ?? 0
-    if (!acc[k]) acc[k] = []
-    acc[k].push(c)
-    return acc
-  }, {} as Record<number, Contact[]>)
-
-  const personImportances = new Set(persons.map(p => p.importance))
+  // Klíč párování: importance kontaktu = pořadí osoby (legacy). person_key = definitivní vazba.
+  const personByImportance: Record<number, ContactPerson> = {}
+  persons.forEach(p => { personByImportance[p.importance] = p })
+  const personByKey: Record<number, ContactPerson> = {}
+  persons.forEach(p => { personByKey[p.person_key] = p })
   const accountByPersonKey: Record<number, any> = {}
   userAccounts.forEach((a: any) => { if (a.person_key != null) accountByPersonKey[a.person_key] = a })
-  const orphanAccounts = userAccounts.filter((a: any) => a.person_key == null)
 
-  const shownInPersonRows = new Set(
-    contacts.filter(c => personImportances.has(c.importance) && (c.type === 'G' || c.type === 'E'))
-      .map(c => c.contact_key)
-  )
-  const companyContacts = contacts.filter(c => !shownInPersonRows.has(c.contact_key))
+  // Kontakty dané osoby: type G/E s importance = person.importance
+  const contactsForPerson = (p: ContactPerson) => contacts.filter(c => c.importance === p.importance && (c.type === 'G' || c.type === 'E'))
+  // Kontakty bez osoby (importance NULL) = řádek "---"
+  const orphanContacts = contacts.filter(c => c.importance == null && (c.type === 'G' || c.type === 'E'))
+
+  // Řádek pro každý účet: spárovaná osoba dle person_key; orphan účet → osoba dle acc_importance
+  const accountRow = (acc: any): ContactPerson | undefined => {
+    if (acc.person_key != null) return personByKey[acc.person_key]
+    if (acc.acc_importance != null) return personByImportance[acc.acc_importance]
+    return undefined
+  }
+  // Kontakty k účtu: spárovaná osoba → její kontakty; orphan bez osoby → orphan kontakty
+  const contactsForAccount = (acc: any): Contact[] => {
+    const p = accountRow(acc)
+    return p ? contactsForPerson(p) : orphanContacts
+  }
+
+  // Každý účet = řádek. Kontakty se zobrazí pouze v řádku účtu (ne v řádku osoby bez účtu).
+  const contactInAccountRow = new Set(userAccounts.flatMap(acc => contactsForAccount(acc).map(c => c.contact_key)))
+  // Firemní kontakty = G/E bez importance a nezobrazené v řádku účtu + ostatní typy
+  const companyContacts = contacts.filter(c => !contactInAccountRow.has(c.contact_key) && !(c.importance != null && (c.type === 'G' || c.type === 'E')))
+  // Osoby bez účtu — kontakty jsou v řádku orphan účtu, takže zde jen jméno
+  const personsWithoutAccount = persons.filter(p => !accountByPersonKey[p.person_key])
+  // Admin (firemní) účty = person_key NULL → zobrazit POD listem osob s prázdným jménem
+  const personAccounts = userAccounts.filter((a: any) => a.person_key != null)
+  const adminAccounts = userAccounts.filter((a: any) => a.person_key == null)
 
   return (
     <div>
@@ -192,17 +214,19 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
-            {persons.map((person) => {
-              const pContacts = contactsByImportance[person.importance] ?? []
+            {personAccounts.map((acc: any) => {
+              const person = accountRow(acc) ?? null
+              const pContacts = contactsForAccount(acc)
               const mobiles = pContacts.filter(c => c.type === 'G')
               const emails = pContacts.filter(c => c.type === 'E')
-              const account = accountByPersonKey[person.person_key]
-              const isEditing = editKey === person.person_key
-              const nameCls = person.sex === 'F' ? 'font-medium text-pink-600' : 'font-medium text-blue-700'
+              const account = acc
+              const rowKey = person ? person.person_key : -1
+              const isEditing = editKey === rowKey
+              const nameCls = person?.sex === 'F' ? 'font-medium text-pink-600' : 'font-medium text-blue-700'
 
               if (isEditing && editData) {
                 return (
-                  <tr key={person.person_key} className="bg-teal-50/40">
+                  <tr key={`acc-${acc.username}`} className="bg-teal-50/40">
                     {/* Jméno edit */}
                     <td className="px-3 py-2">
                       <div className="flex gap-1">
@@ -262,7 +286,7 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
                             </svg>
                           )}
                         </button>
-                        <button onClick={() => { setEditKey(null); setEditData(null) }}
+                        <button onClick={() => { setEditKey(null); setEditAdminKey(null); setEditData(null) }}
                           className="flex items-center justify-center border border-gray-300 rounded-lg px-2 py-1 hover:bg-gray-100">
                           <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -276,17 +300,17 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
 
               return (
                 <>
-                  <tr key={person.person_key}
+                  <tr key={`acc-${acc.username}`}
                     className="hover:bg-gray-50 cursor-pointer group"
                     onClick={() => startEdit(person, pContacts, account)}>
-                    <td className="px-3 py-2.5"><span className={nameCls}>{person.name}</span></td>
+                    <td className="px-3 py-2.5">{person ? <span className={nameCls}>{person.name}</span> : <span className="text-gray-300 italic text-sm">—</span>}</td>
                     <td className="px-3 py-2.5">
                       <div className="flex flex-col gap-0.5">
                         {mobiles.map(c => (
                           <div key={c.contact_key} className="flex items-center gap-1.5">
                             <span className="text-gray-800">{c.value}</span>
                             <button title="Odeslat SMS"
-                              onClick={e => { e.stopPropagation(); setSmsTarget({ gsm: c.value, name: person.name }) }}
+                              onClick={e => { e.stopPropagation(); setSmsTarget({ gsm: c.value, name: person?.name ?? '' }) }}
                               className="text-gray-300 hover:text-teal-600 transition-colors">
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -325,6 +349,13 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
                                 {type === 'devel' ? 'app2' : type}
                               </button>
                             ))}
+                            {emails[0] && (
+                              <button title={`Odeslat přístupy na ${emails[0].value}`}
+                                onClick={e => { e.stopPropagation(); setAccessTarget({ email: emails[0].value, username: account.username, password: account.password ?? '' }) }}
+                                className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-blue-100 hover:text-blue-700 text-gray-500 transition-colors">
+                                @
+                              </button>
+                            )}
                           </div>
                         )}
                       </div>
@@ -333,44 +364,206 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
                       <span className="font-mono text-gray-500 text-xs">{account?.password ?? ''}</span>
                     </td>
                     <td className="px-3 py-2.5">
-                      <button title="Smazat" onClick={e => { e.stopPropagation(); handleDeletePerson(person.person_key) }}
-                        className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                      {person && (
+                        <button title="Smazat" onClick={e => { e.stopPropagation(); handleDeletePerson(person.person_key) }}
+                          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      )}
                     </td>
                   </tr>
                 </>
               )
             })}
 
-            {/* Účty bez osoby */}
-            {orphanAccounts.map((acc: any, i: number) => (
-              <tr key={`orphan-${acc.username}`} className="hover:bg-gray-50 group">
-                <td className="px-3 py-2.5 text-gray-300 italic text-sm">—</td>
-                <td className="px-3 py-2.5"></td>
-                <td className="px-3 py-2.5"></td>
-                <td className="px-3 py-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-gray-800 text-xs">{acc.username}</span>
-                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {(['app','devel'] as const).map(type => (
-                        <button key={type} onClick={e => { e.stopPropagation(); handleImpersonate(type, acc.username) }}
-                          disabled={impersonating === `${type}:${acc.username}`}
-                          title={`Impersonace ${type}`}
-                          className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-500 transition-colors disabled:opacity-50">
-                          {type}
-                        </button>
+            {/* Osoby bez účtu — jméno + jejich kontakty (bez uživatele/hesla) */}
+            {personsWithoutAccount.map(person => {
+              const nameCls = person.sex === 'F' ? 'font-medium text-pink-600' : 'font-medium text-blue-700'
+              const pContacts = contactsForPerson(person)
+              const mobiles = pContacts.filter(c => c.type === 'G')
+              const emails = pContacts.filter(c => c.type === 'E')
+              return (
+                <tr key={`noacc-${person.person_key}`} className="hover:bg-gray-50 cursor-pointer group"
+                  onClick={() => startEdit(person, pContacts, undefined)}>
+                  <td className="px-3 py-2.5"><span className={nameCls}>{person.name}</span></td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex flex-col gap-0.5">
+                      {mobiles.map(c => (
+                        <div key={c.contact_key} className="flex items-center gap-1.5">
+                          <span className="text-gray-800">{c.value}</span>
+                          <button title="Odeslat SMS"
+                            onClick={e => { e.stopPropagation(); setSmsTarget({ gsm: c.value, name: person.name }) }}
+                            className="text-gray-300 hover:text-teal-600 transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            </svg>
+                          </button>
+                        </div>
                       ))}
                     </div>
-                  </div>
-                </td>
-                <td className="px-3 py-2.5"><span className="font-mono text-gray-500 text-xs">{acc.password}</span></td>
-                <td className="px-3 py-2.5"></td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex flex-col gap-0.5">
+                      {emails.map(c => (
+                        <div key={c.contact_key} className="flex items-center gap-1.5">
+                          <span className="text-gray-800">{c.value}</span>
+                          <button title="Odeslat e-mail"
+                            onClick={e => { e.stopPropagation(); setEmailTarget(c.value) }}
+                            className="text-gray-300 hover:text-blue-600 transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5"></td>
+                  <td className="px-3 py-2.5"></td>
+                  <td className="px-3 py-2.5">
+                    <button title="Smazat" onClick={e => { e.stopPropagation(); handleDeletePerson(person.person_key) }}
+                      className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-500 transition-opacity">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+
+            {/* Admin (firemní) účty — person_key NULL, prázdné jméno, POD listem osob */}
+            {adminAccounts.map((acc: any) => {
+              const pContacts = contactsForAccount(acc)
+              const mobiles = pContacts.filter(c => c.type === 'G')
+              const emails = pContacts.filter(c => c.type === 'E')
+              const isEditing = editAdminKey === acc.username
+
+              if (isEditing && editData) {
+                return (
+                  <tr key={`admin-${acc.username}`} className="bg-teal-50/40">
+                    <td className="px-3 py-2"><span className="text-gray-300 italic text-sm">&nbsp;</span></td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-1">
+                        {editData.mobiles.map((m, i) => (
+                          <input key={m.contact_key} className={inputCls} value={m.value}
+                            onChange={e => setEditData(p => p && ({ ...p, mobiles: p.mobiles.map((x, j) => j === i ? { ...x, value: e.target.value } : x) }))} />
+                        ))}
+                        {editData.mobiles.length === 0 && (
+                          <input className={inputCls} value={editData.newMobile} placeholder="+ přidat"
+                            onChange={e => setEditData(p => p && ({ ...p, newMobile: e.target.value }))} />
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-1">
+                        {editData.emails.map((m, i) => (
+                          <input key={m.contact_key} className={inputCls} value={m.value}
+                            onChange={e => setEditData(p => p && ({ ...p, emails: p.emails.map((x, j) => j === i ? { ...x, value: e.target.value } : x) }))} />
+                        ))}
+                        {editData.emails.length === 0 && (
+                          <input className={inputCls} value={editData.newEmail} placeholder="+ přidat"
+                            onChange={e => setEditData(p => p && ({ ...p, newEmail: e.target.value }))} />
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <input className={inputCls + ' font-mono'} value={editData.username}
+                        onChange={e => setEditData(p => p && ({ ...p, username: e.target.value }))} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input className={inputCls + ' font-mono'} value={editData.password}
+                        onChange={e => setEditData(p => p && ({ ...p, password: e.target.value }))} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-1">
+                        <button onClick={() => handleSave(null)} disabled={saving}
+                          className="flex items-center justify-center bg-teal-600 text-white rounded-lg px-2 py-1 hover:bg-teal-700 disabled:opacity-50">
+                          {saving ? <Spinner size={3} /> : (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                        <button onClick={() => { setEditKey(null); setEditAdminKey(null); setEditData(null) }}
+                          className="flex items-center justify-center border border-gray-300 rounded-lg px-2 py-1 hover:bg-gray-100">
+                          <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              }
+
+              return (
+                <tr key={`admin-${acc.username}`} className="hover:bg-gray-50 cursor-pointer group bg-gray-50/50"
+                  onClick={() => startEdit(null, pContacts, acc)}>
+                  <td className="px-3 py-2.5"><span className="text-gray-300 italic text-sm">&nbsp;</span></td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex flex-col gap-0.5">
+                      {mobiles.map(c => (
+                        <div key={c.contact_key} className="flex items-center gap-1.5">
+                          <span className="text-gray-800">{c.value}</span>
+                          <button title="Odeslat SMS"
+                            onClick={e => { e.stopPropagation(); setSmsTarget({ gsm: c.value, name: '' }) }}
+                            className="text-gray-300 hover:text-teal-600 transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex flex-col gap-0.5">
+                      {emails.map(c => (
+                        <div key={c.contact_key} className="flex items-center gap-1.5">
+                          <span className="text-gray-800">{c.value}</span>
+                          <button title="Odeslat e-mail"
+                            onClick={e => { e.stopPropagation(); setEmailTarget(c.value) }}
+                            className="text-gray-300 hover:text-blue-600 transition-colors">
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-gray-800 text-xs">{acc.username}</span>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {(['app','devel'] as const).map(type => (
+                          <button key={type} onClick={e => { e.stopPropagation(); handleImpersonate(type, acc.username) }}
+                            disabled={impersonating === `${type}:${acc.username}`}
+                            title={`Impersonace ${type === 'devel' ? 'app2' : type}`}
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-teal-100 hover:text-teal-700 text-gray-500 transition-colors disabled:opacity-50">
+                            {type === 'devel' ? 'app2' : type}
+                          </button>
+                        ))}
+                        {emails[0] && (
+                          <button title={`Odeslat přístupy na ${emails[0].value}`}
+                            onClick={e => { e.stopPropagation(); setAccessTarget({ email: emails[0].value, username: acc.username, password: acc.password ?? '' }) }}
+                            className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-gray-100 hover:bg-blue-100 hover:text-blue-700 text-gray-500 transition-colors">
+                            @
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-2.5"><span className="font-mono text-gray-500 text-xs">{acc.password}</span></td>
+                  <td className="px-3 py-2.5"></td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
 
@@ -418,6 +611,16 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
           companyKey={companyKey}
           initialEmail={emailTarget}
           onClose={() => setEmailTarget(null)}
+        />
+      )}
+
+      {accessTarget && (
+        <SendEmailModal
+          companyKey={companyKey}
+          initialEmail={accessTarget.email}
+          initialCtx={{ username: accessTarget.username, password: accessTarget.password }}
+          initialNoteType="O"
+          onClose={() => setAccessTarget(null)}
         />
       )}
 

@@ -5,6 +5,8 @@ import { Spinner } from './Spinner'
 interface Props {
   companyKey: string
   initialEmail?: string
+  initialCtx?: Record<string, string>  // dodatečné hodnoty pro placeholdery (např. username/password konkrétního účtu)
+  initialNoteType?: string
   onClose: () => void
 }
 
@@ -112,7 +114,7 @@ function applyCtx(text: string, ctx: Record<string, string>) {
   return r
 }
 
-export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => {
+export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNoteType, onClose }: Props) => {
   const [tab, setTab] = useState<'send' | 'templates'>('send')
   const [templates, setTemplates] = useState<EmailTemplate[]>(DEFAULT_TEMPLATES)
   const [templatesLoaded, setTemplatesLoaded] = useState(false)
@@ -129,7 +131,7 @@ export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => 
   const [message, setMessage] = useState('')
   const [bcc, setBcc] = useState(false)
   const [bccEmail, setBccEmail] = useState('')
-  const [noteType, setNoteType] = useState('S')
+  const [noteType, setNoteType] = useState(initialNoteType ?? 'S')
   const [activeGroup, setActiveGroup] = useState(GROUPS[0])
   const [signature, setSignature] = useState('')
   const [sending, setSending] = useState(false)
@@ -171,7 +173,7 @@ export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => 
     // Backend posílá name{importance}/sex{importance}, šablony používají acc_name/acc_sex.
     const rec = recipients.find(r => r.email === to) as any
     const imp = rec?.importance
-    const fullCtx = { ...ctx }
+    const fullCtx = { ...ctx, ...initialCtx }
     fullCtx.acc_name = (imp != null && imp !== 0 ? ctx[`name${imp}`] : '') ?? ''
     fullCtx.acc_sex = (imp != null && imp !== 0 ? ctx[`sex${imp}`] : '') ?? ''
     setSubject(applyCtx(tpl.subject, fullCtx))
@@ -186,7 +188,7 @@ export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => 
     setSending(true); setError('')
     try {
       const fullMessage = signature.trim() ? `${message}\n\n${signature}` : message
-      await sendMail({ company_key: Number(companyKey), to, sender, subject, message: fullMessage, bcc, bcc_email: bcc ? bccEmail : undefined, note_type: noteType, note_text: subject })
+      await sendMail({ company_key: Number(companyKey), to, sender, subject, message: fullMessage, bcc, bcc_email: bcc ? bccEmail : undefined, note_type: noteType, note_text: subject, ctx: initialCtx })
       setSent(true)
       setTimeout(onClose, 1200)
     } catch (e: any) { setError(e.message) }
@@ -269,7 +271,7 @@ export const SendEmailModal = ({ companyKey, initialEmail, onClose }: Props) => 
                 {recipients.length > 1 ? (
                   <select className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                     value={to} onChange={e => setTo(e.target.value)}>
-                    {recipients.map(r => <option key={r.email} value={r.email}>{r.label}</option>)}
+                    {recipients.map((r, i) => <option key={`${r.email}-${i}`} value={r.email}>{r.label}</option>)}
                   </select>
                 ) : (
                   <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"

@@ -410,9 +410,11 @@ export async function companiesRoutes(app: FastifyInstance) {
       `
       const { employeeSchema } = (request as any).user
       const userAccounts = await sql`
-        SELECT username, password FROM ONLY ${sql(employeeSchema + '.user_account')}
-        WHERE company_key = ${id}
-        ORDER BY username
+        SELECT UA.username, UA.password, UA.person_key, CP.importance AS acc_importance
+        FROM ONLY ${sql(employeeSchema + '.user_account')} UA
+        LEFT JOIN provider.contact_person CP ON UA.person_key = CP.person_key
+        WHERE UA.company_key = ${id}
+        ORDER BY UA.username
       `
       return reply.send({ persons, contacts, userAccounts })
     } finally {
@@ -806,19 +808,28 @@ export async function companiesRoutes(app: FastifyInstance) {
     const { userDb, passwordDb, employeeSchema } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     const { id } = request.params as { id: string }
-    const { username, password, username_old } = request.body as { username: string; password: string; username_old?: string }
+    const { username, password, username_old, person_key } = request.body as {
+      username: string; password: string; username_old?: string; person_key?: number | null
+    }
 
     try {
-      if (username_old) {
+      // Smazání: prázdný username + existující username_old
+      if (!username.trim() && username_old) {
+        await sql`
+          DELETE FROM ONLY ${sql(employeeSchema + '.user_account')}
+          WHERE company_key = ${id} AND username = ${username_old}
+        `
+      } else if (username_old) {
         await sql`
           UPDATE ONLY ${sql(employeeSchema + '.user_account')}
-          SET username = ${username}, password = ${password}
+          SET username = ${username}, password = ${password},
+              person_key = ${person_key !== undefined ? person_key : sql`person_key`}
           WHERE company_key = ${id} AND username = ${username_old}
         `
       } else {
         await sql`
-          INSERT INTO ${sql(employeeSchema + '.user_account')} (company_key, username, password)
-          VALUES (${id}, ${username}, ${password})
+          INSERT INTO ${sql(employeeSchema + '.user_account')} (company_key, username, password, person_key)
+          VALUES (${id}, ${username}, ${password}, ${person_key ?? null})
           ON CONFLICT (company_key, username) DO UPDATE SET password = ${password}
         `
       }

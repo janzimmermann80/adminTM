@@ -50,6 +50,7 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
   const [tab, setTab] = useState(initialTab)
   const [orphanAccounts, setOrphanAccounts] = useState<any[]>([])
   const [impersonating, setImpersonating] = useState<string | null>(null)
+  const [copiedAcc, setCopiedAcc] = useState<string | null>(null)
   const [idBusy, setIdBusy] = useState(false)
 
   // Přidání záznamu do deníku
@@ -139,6 +140,21 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
       window.open(url, '_blank')
     } catch {}
     finally { setImpersonating(null) }
+  }
+
+  // Zkopíruje heslo a uživatele do schránky jako dvě položky Windows multi-schránky (Win+V).
+  // Pořadí zápisu: heslo → uživatel, takže uživatel je "current" (Ctrl+V vloží nejdřív jeho), heslo je o položku zpět.
+  // Pauza mezi zápisy — Windows schránka deduplikuje okamžité po sobě jdoucí zápisy.
+  const handleCopyCredentials = async (acc: any) => {
+    try {
+      if (acc.password) {
+        await navigator.clipboard.writeText(String(acc.password))
+        await new Promise(r => setTimeout(r, 300))
+      }
+      await navigator.clipboard.writeText(String(acc.username))
+      setCopiedAcc(acc.username)
+      setTimeout(() => setCopiedAcc(null), 1200)
+    } catch {}
   }
 
   useEffect(() => {
@@ -266,6 +282,21 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
                     {type}
                   </button>
                 ))}
+                <button
+                  onClick={() => handleCopyCredentials(acc)}
+                  title="Kopírovat uživatele a heslo do schránky"
+                  className={`p-0.5 rounded transition-colors ${copiedAcc === acc.username ? 'text-teal-600' : 'text-gray-300 hover:text-teal-600 hover:bg-teal-50'}`}
+                >
+                  {copiedAcc === acc.username ? (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-2M8 5a2 2 0 002 2h4a2 2 0 002-2M8 5a2 2 0 012-2h4a2 2 0 012 2" />
+                    </svg>
+                  )}
+                </button>
               </span>
             ))}
           </div>

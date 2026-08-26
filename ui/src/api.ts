@@ -234,6 +234,7 @@ export const sendMail = (body: {
   subject: string; message: string
   bcc?: boolean; bcc_email?: string
   note_type: string; note_text: string
+  ctx?: Record<string, string>
 }) => post<{ success: boolean }>('/send-mail/send', body)
 export const getEmailTemplates = () => get<any[]>('/send-mail/templates')
 export const saveEmailTemplates = (templates: any[]) => put<{ success: boolean }>('/send-mail/templates', templates)

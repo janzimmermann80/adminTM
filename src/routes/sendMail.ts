@@ -9,6 +9,14 @@ const SENDERS = {
   D: { name: 'TruckManager.eu', email: 'info@truckmanager.eu' },
 }
 
+// Dosadí volitelné hodnoty (např. username/password konkrétního účtu) do <+key+> placeholderů
+function applyCtxOverrides(text: string, ctx?: Record<string, string>) {
+  if (!ctx) return text
+  let r = text
+  for (const [k, v] of Object.entries(ctx)) r = r.split(`<+${k}+>`).join(v)
+  return r
+}
+
 export async function sendMailRoutes(app: FastifyInstance) {
 
   // GET /api/send-mail/context/:companyKey
@@ -155,9 +163,12 @@ export async function sendMailRoutes(app: FastifyInstance) {
       bcc_email?: string
       note_type: string
       note_text: string
+      ctx?: Record<string, string>  // volitelné dodatečné placeholder hodnoty (např. username/password konkrétního účtu)
     }
 
     const senderInfo = SENDERS[body.sender] ?? SENDERS.D
+    const subject = applyCtxOverrides(body.subject, body.ctx)
+    const message = applyCtxOverrides(body.message, body.ctx)
 
     try {
       // SMTP auth = přihlašovací údaje přihlášeného uživatele (SSO euro-sped).
@@ -170,12 +181,12 @@ export async function sendMailRoutes(app: FastifyInstance) {
         auth: smtpUser ? { user: smtpUser, pass: smtpPass } : undefined,
       })
 
-      const msgHtml = body.message.replace(/\n/g, '<br>').replace(/<s>/g, '&nbsp;')
+      const msgHtml = message.replace(/\n/g, '<br>').replace(/<s>/g, '&nbsp;')
 
       const mailOptions: any = {
         from: `${senderInfo.name} <${senderInfo.email}>`,
         to: body.to,
-        subject: body.subject,
+        subject: subject,
         html: msgHtml,
         headers: {
           'X-Sender': '<info@truckmanager.eu>',
@@ -201,7 +212,7 @@ export async function sendMailRoutes(app: FastifyInstance) {
       // Log to diary regardless
       await sql`
         INSERT INTO ${sql(schema + '.note')} (company_key, creator, type, text)
-        VALUES (${body.company_key}, ${initials}, ${body.note_type}, ${'E-mail > ' + body.note_text + ' > ' + body.message})
+        VALUES (${body.company_key}, ${initials}, ${body.note_type}, ${'E-mail > ' + body.note_text + ' > ' + message})
       `
 
       if (!sent) {
