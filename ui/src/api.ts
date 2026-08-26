@@ -429,3 +429,45 @@ export type SearchBResult = {
 
 export const searchB = (q: string) =>
   get<SearchBResult[]>(`/search/b?q=${encodeURIComponent(q)}`)
+
+// ── GPS imports dashboard ────────────────────────────────────────────────────
+
+export type ImportStatus = 'ok' | 'error' | 'stale' | 'suspended'
+
+export type ImportServiceRow = {
+  company_key: number
+  company_id: string | null
+  company_name: string | null
+  import_type: string
+  import_name: string | null
+  comp_id: string | null
+  comp_name: string | null
+  last_import_time: string | null
+  last_error: string | null
+  suspended_on: string | null
+  status: ImportStatus
+}
+
+export type ImportCarStatus = 'ok' | 'error' | 'silent' | 'gone-from-vendor' | 'inactive'
+
+export type ImportCarRow = {
+  company_key: number
+  import_type: string
+  ext_id: string
+  ext_name: string | null
+  car_key: number | null
+  spz: string | null
+  vin: string | null
+  inactive: boolean | null
+  last_imported_rec_time: string | null
+  last_car_import_time: string | null
+  last_import_time: string | null
+  last_error: string | null
+  car_status: ImportCarStatus
+}
+
+export const getImports = () => get<ImportServiceRow[]>('/imports')
+
+export const getImportCars = (companyKey: number, importType: string) =>
+  get<ImportCarRow[]>(`/imports/${companyKey}/${encodeURIComponent(importType)}/cars`)
+

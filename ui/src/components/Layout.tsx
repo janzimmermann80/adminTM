@@ -96,6 +96,12 @@ const IconBank = () => (
   </svg>
 )
 
+const IconImport = () => (
+  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4" />
+  </svg>
+)
+
 const IconLogout = () => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -115,6 +121,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Kampaně',         icon: <IconCampaign />,   disabled: true },
   { label: 'AI asistent',     icon: <IconAI />,         disabled: true },
   { to: '/bank',              label: 'Banka',           icon: <IconBank /> },
+  { to: '/imports',           label: 'Importy',         icon: <IconImport /> },
   { to: '/queries',           label: 'Dotazy',          icon: <IconQueries /> },
 ]
 
