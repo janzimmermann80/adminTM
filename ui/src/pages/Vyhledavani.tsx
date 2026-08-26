@@ -262,6 +262,7 @@ export const Vyhledavani = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [searched, setSearched] = useState(false)
+  const [lastMode, setLastMode] = useState<'contains' | 'begins' | 'selecting'>('contains')
   const [order, setOrder] = useState<string>('company')
   const [deletingKey, setDeletingKey] = useState<string | null>(null)
   const firstRef = useRef<HTMLInputElement>(null)
@@ -316,6 +317,7 @@ export const Vyhledavani = () => {
     setLoading(true)
     setError('')
     setSearched(true)
+    setLastMode(mode)
     try {
       const res = await search(buildParams(off, mode, orderOverride))
       setResults(res.data)
@@ -329,7 +331,7 @@ export const Vyhledavani = () => {
   }
 
   const handlePage = (newOffset: number) => {
-    doSearch(newOffset, 'contains')
+    doSearch(newOffset, lastMode, order)
     window.scrollTo(0, 0)
   }
 

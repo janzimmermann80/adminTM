@@ -104,8 +104,9 @@ export async function companiesRoutes(app: FastifyInstance) {
                T.name AS tariff_name,
                CD.credit_tip_sms, CD.contract, CD.contract_date,
                CD.prog_sent, CD.prog_sent_date, CD.prog_lent, CD.prog_lent_date,
+               CD.prog_purchased, CD.prog_purchased_date,
                CD.admittance, CD.admittance_date, CD.forwarding, CD.forwarding_date,
-               CD.car_pool, CD.car_pool_date, CD.claim_exchange, CD.advert_discount,
+               CD.car_pool, CD.car_pool_date, CD.claim_exchange, CD.claim_exchange_date, CD.advert_discount,
                CD.show_date, CD.send_emails_from_their_domain,
                CIA.company AS invoice_company, CIA.street AS invoice_street,
                CIA.city AS invoice_city, CIA.zip AS invoice_zip, CIA.country AS invoice_country
@@ -926,10 +927,13 @@ export async function companiesRoutes(app: FastifyInstance) {
       contract?: string | null; contract_date?: string | null
       prog_sent?: string | null; prog_sent_date?: string | null
       prog_lent?: string | null; prog_lent_date?: string | null
+      prog_purchased?: string | null; prog_purchased_date?: string | null
       admittance?: string | null; admittance_date?: string | null
       forwarding?: string | null; forwarding_date?: string | null
       car_pool?: string | null; car_pool_date?: string | null
       claim_exchange?: string | null
+      claim_exchange_date?: string | null
+      show_date?: string | null
       credit_tip_sms?: number | null
       advert_discount?: number | null
       send_emails_from_their_domain?: boolean | null
@@ -939,18 +943,22 @@ export async function companiesRoutes(app: FastifyInstance) {
       await sql`
         UPDATE provider.company_detail SET
           contract                    = COALESCE(${body.contract ?? null}, contract),
-          contract_date               = COALESCE(${body.contract_date ?? null}::date, contract_date),
+          contract_date               = ${body.contract_date !== undefined ? (body.contract_date || null) : sql`contract_date`},
           prog_sent                   = COALESCE(${body.prog_sent ?? null}, prog_sent),
-          prog_sent_date              = COALESCE(${body.prog_sent_date ?? null}::date, prog_sent_date),
+          prog_sent_date              = ${body.prog_sent_date !== undefined ? (body.prog_sent_date || null) : sql`prog_sent_date`},
           prog_lent                   = COALESCE(${body.prog_lent ?? null}, prog_lent),
-          prog_lent_date              = COALESCE(${body.prog_lent_date ?? null}::date, prog_lent_date),
+          prog_lent_date              = ${body.prog_lent_date !== undefined ? (body.prog_lent_date || null) : sql`prog_lent_date`},
+          prog_purchased              = COALESCE(${body.prog_purchased ?? null}, prog_purchased),
+          prog_purchased_date         = ${body.prog_purchased_date !== undefined ? (body.prog_purchased_date || null) : sql`prog_purchased_date`},
           admittance                  = COALESCE(${body.admittance ?? null}, admittance),
-          admittance_date             = COALESCE(${body.admittance_date ?? null}::date, admittance_date),
+          admittance_date             = ${body.admittance_date !== undefined ? (body.admittance_date || null) : sql`admittance_date`},
           forwarding                  = COALESCE(${body.forwarding ?? null}, forwarding),
-          forwarding_date             = COALESCE(${body.forwarding_date ?? null}::date, forwarding_date),
+          forwarding_date             = ${body.forwarding_date !== undefined ? (body.forwarding_date || null) : sql`forwarding_date`},
           car_pool                    = COALESCE(${body.car_pool ?? null}, car_pool),
-          car_pool_date               = COALESCE(${body.car_pool_date ?? null}::date, car_pool_date),
+          car_pool_date               = ${body.car_pool_date !== undefined ? (body.car_pool_date || null) : sql`car_pool_date`},
           claim_exchange              = COALESCE(${body.claim_exchange ?? null}, claim_exchange),
+          claim_exchange_date         = ${body.claim_exchange_date !== undefined ? (body.claim_exchange_date || null) : sql`claim_exchange_date`},
+          show_date                   = ${body.show_date !== undefined ? (body.show_date || null) : sql`show_date`},
           credit_tip_sms              = COALESCE(${body.credit_tip_sms ?? null}, credit_tip_sms),
           advert_discount             = COALESCE(${body.advert_discount ?? null}, advert_discount),
           send_emails_from_their_domain = COALESCE(${body.send_emails_from_their_domain ?? null}, send_emails_from_their_domain)

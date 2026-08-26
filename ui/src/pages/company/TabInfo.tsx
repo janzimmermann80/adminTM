@@ -76,6 +76,8 @@ export const TabInfo = ({ company, onReload }: Props) => {
     prog_sent_date: parseApiDate(company.prog_sent_date),
     prog_lent: company.prog_lent ?? '',
     prog_lent_date: parseApiDate(company.prog_lent_date),
+    prog_purchased: company.prog_purchased ?? '',
+    prog_purchased_date: parseApiDate(company.prog_purchased_date),
     admittance: company.admittance ?? '',
     admittance_date: parseApiDate(company.admittance_date),
     forwarding: company.forwarding ?? '',
@@ -83,6 +85,8 @@ export const TabInfo = ({ company, onReload }: Props) => {
     car_pool: company.car_pool ?? '',
     car_pool_date: parseApiDate(company.car_pool_date),
     claim_exchange: company.claim_exchange ?? '',
+    claim_exchange_date: parseApiDate(company.claim_exchange_date),
+    show_date: parseApiDate(company.show_date),
     credit_tip_sms: company.credit_tip_sms ?? '',
     advert_discount: company.advert_discount ?? '',
     send_emails_from_their_domain: company.send_emails_from_their_domain ?? false,
@@ -163,9 +167,11 @@ export const TabInfo = ({ company, onReload }: Props) => {
     setSaving(true); setError('')
     try {
       const body: Record<string, any> = { ...svc }
-      // empty strings → null for all fields
+      // empty strings → null pro ostatní pole; ale služební checkboxy (contract, prog_sent, prog_lent,
+      // admittance, forwarding, car_pool) posíláme jako '' → backend je vypne (COALESCE by null ponechal starou hodnotu)
+      const flagKeys = ['contract', 'prog_sent', 'prog_lent', 'admittance', 'forwarding', 'car_pool', 'claim_exchange']
       for (const k of Object.keys(body)) {
-        if (body[k] === '') body[k] = null
+        if (body[k] === '' && !flagKeys.includes(k)) body[k] = null
       }
       await updateServices(String(company.company_key), body)
       setEditServices(false)
@@ -251,17 +257,21 @@ export const TabInfo = ({ company, onReload }: Props) => {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className={labelCls}>IČO</label>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 items-center">
                     <input className={ic} readOnly={ro} value={basic.cin} onFocus={activate} onChange={e => setBasic(p => ({ ...p, cin: e.target.value }))} />
                     <button type="button" onClick={lookupCin} disabled={cinLookupLoading || !basic.cin.trim()}
-                      title={basic.country.toUpperCase() === 'SK' ? 'Vyhledat v ORSR' : 'Vyhledat v ARES'}
-                      className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-600">
-                      {cinLookupLoading ? <Spinner size={3} /> : (
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
-                        </svg>
-                      )}
+                      title={basic.country.toUpperCase() === 'SK' ? 'Doplnit údaje z ORSR/FinStat' : 'Doplnit údaje z ARES'}
+                      className="shrink-0 flex items-center rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-600 px-2 h-8 text-xs">
+                      {cinLookupLoading ? <Spinner size={3} /> : 'Doplnit'}
                     </button>
+                    <a href={`https://ares.gov.cz/ekonomicke-subjekty?ico=${encodeURIComponent(basic.cin.trim())}`} target="_blank" rel="noreferrer"
+                      title="Ověřit v ARES (CZ)" onClick={e => e.stopPropagation()}
+                      className="shrink-0 text-xs text-[#0a6b6b] hover:underline px-1">ARES</a>
+                    {basic.country.trim().toUpperCase() === 'SK' && (
+                      <a href={`https://finstat.sk/firma/${encodeURIComponent(basic.cin.trim())}`} target="_blank" rel="noreferrer"
+                        title="Otevřít ve FinStat (SK)" onClick={e => e.stopPropagation()}
+                        className="shrink-0 text-xs text-[#0a6b6b] hover:underline px-1">FinStat</a>
+                    )}
                   </div>
                   {cinLookupError && <p className="text-xs text-red-500 mt-0.5">{cinLookupError}</p>}
                 </div>
@@ -392,32 +402,56 @@ export const TabInfo = ({ company, onReload }: Props) => {
             {([
               ['contract', 'contract_date', 'Leták'],
               ['prog_sent', 'prog_sent_date', 'Program odeslán'],
+              ['prog_purchased', 'prog_purchased_date', 'Program'],
               ['prog_lent', 'prog_lent_date', 'Registrace'],
               ['admittance', 'admittance_date', 'Přístup'],
-              ['forwarding', 'forwarding_date', 'Přeposílání'],
-              ['car_pool', 'car_pool_date', 'Car pool'],
+              ['forwarding', 'forwarding_date', 'Spedice'],
+              ['car_pool', 'car_pool_date', 'Autopark'],
             ] as [keyof typeof svc, keyof typeof svc, string][]).map(([vk, dk, label]) => (
-              <div key={vk} className="flex items-end gap-3 border-b border-gray-50 pb-2">
+              <div key={vk} className="flex items-center gap-3 border-b border-gray-50 pb-2">
+                <label className="flex items-center gap-2 cursor-pointer w-44 flex-shrink-0">
+                  <input type="checkbox" className="rounded"
+                    checked={Boolean(String(svc[vk] ?? '').trim())}
+                    onChange={e => setSvc(p => ({ ...p, [vk]: e.target.checked ? '*' : '' }))} />
+                  <span className="text-sm text-gray-700">{label}</span>
+                </label>
                 <div className="flex-1">
-                  <label className={labelCls}>{label}</label>
                   <input type="date" className={inputCls} value={String(svc[dk] ?? '')}
                     onChange={e => setSvc(p => ({ ...p, [dk]: e.target.value }))} />
                 </div>
               </div>
             ))}
+            {/* Ukázka — jen datum, bez checkboxu */}
+            <div className="flex items-center gap-3 border-b border-gray-50 pb-2">
+              <span className="text-sm text-gray-700 w-44 flex-shrink-0">Prezentace</span>
+              <div className="flex-1">
+                <input type="date" className={inputCls} value={String(svc.show_date ?? '')}
+                  onChange={e => setSvc(p => ({ ...p, show_date: e.target.value }))} />
+              </div>
+            </div>
+            {/* Burza — select místo popisku + datum */}
+            <div className="flex items-center gap-3 border-b border-gray-50 pb-2">
+              <select className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none w-44 flex-shrink-0"
+                value={String(svc.claim_exchange ?? '')}
+                title="Burza"
+                onChange={e => setSvc(p => ({ ...p, claim_exchange: e.target.value }))}>
+                <option value="">— Burza —</option>
+                <option value="A">Kompletní přístup</option>
+                <option value="B">Pouze čtení</option>
+              </select>
+              <div className="flex-1">
+                <input type="date" className={inputCls} value={String(svc.claim_exchange_date ?? '')}
+                  onChange={e => setSvc(p => ({ ...p, claim_exchange_date: e.target.value }))} />
+              </div>
+            </div>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
-                <label className={labelCls}>Výměna nároků</label>
-                <input className={inputCls} value={String(svc.claim_exchange ?? '')}
-                  onChange={e => setSvc(p => ({ ...p, claim_exchange: e.target.value }))} />
-              </div>
-              <div>
-                <label className={labelCls}>Credit tip SMS</label>
+                <label className={labelCls}>Kredit SMS</label>
                 <input type="number" className={inputCls} value={String(svc.credit_tip_sms ?? '')}
                   onChange={e => setSvc(p => ({ ...p, credit_tip_sms: e.target.value }))} />
               </div>
               <div>
-                <label className={labelCls}>Slevová reklama (%)</label>
+                <label className={labelCls}>Sleva (%)</label>
                 <input type="number" className={inputCls} value={String(svc.advert_discount ?? '')}
                   onChange={e => setSvc(p => ({ ...p, advert_discount: e.target.value }))} />
               </div>
@@ -465,15 +499,17 @@ export const TabInfo = ({ company, onReload }: Props) => {
             </div>
             <ServiceRow label="Leták" version={company.contract} date={company.contract_date} />
             <ServiceRow label="Program odeslán" version={company.prog_sent} date={company.prog_sent_date} />
+            <ServiceRow label="Program" version={company.prog_purchased} date={company.prog_purchased_date} />
             <ServiceRow label="Registrace" version={company.prog_lent} date={company.prog_lent_date} />
             <ServiceRow label="Přístup" version={company.admittance} date={company.admittance_date} />
-            <ServiceRow label="Přeposílání" version={company.forwarding} date={company.forwarding_date} />
-            <ServiceRow label="Car pool" version={company.car_pool} date={company.car_pool_date} />
-            <ServiceRow label="Výměna nároků" version={company.claim_exchange} />
+            <ServiceRow label="Spedice" version={company.forwarding} date={company.forwarding_date} />
+            <ServiceRow label="Autopark" version={company.car_pool} date={company.car_pool_date} />
+            <ServiceRow label="Burza" version={company.claim_exchange} date={company.claim_exchange_date} />
+            {company.show_date && <ServiceRow label="Prezentace" date={company.show_date} />}
             {(company.credit_tip_sms != null || company.advert_discount != null) && (
               <div className="py-1.5 flex gap-6 text-sm">
                 {company.credit_tip_sms != null && (
-                  <span className="text-gray-600">Credit tip SMS: <strong>{company.credit_tip_sms}</strong></span>
+                  <span className="text-gray-600">Kredit SMS: <strong>{company.credit_tip_sms}</strong></span>
                 )}
                 {company.advert_discount != null && (
                   <span className="text-gray-600">Sleva reklama: <strong>{company.advert_discount}%</strong></span>
