@@ -418,6 +418,68 @@ export async function statisticsRoutes(app: FastifyInstance) {
     }
   })
 
+  // GET /api/statistics/show-monthly — prezentace (show_date) per měsíc, 36 měsíců
+  app.get('/show-monthly', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const rows = await sql`
+        SELECT to_char(D.show_date, 'YYYY-MM') AS month,
+               count(*)::int AS count,
+               count(*) FILTER (WHERE D.admittance_date >= CURRENT_DATE)::int AS active
+        FROM provider.company_detail AS D
+        WHERE D.show_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+          AND D.show_date <= CURRENT_DATE
+        GROUP BY 1
+        ORDER BY 1
+      `
+      const result = fill36Months(
+        rows.map((r: any) => ({ month: r.month, count: r.count, active: r.active })),
+        (month) => ({ month, count: 0, active: 0 }),
+      )
+      return reply.send(result)
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // GET /api/statistics/show-companies — seznam firem s prezentací (36 měsíců), ?month=YYYY-MM, ?status=active|inactive
+  app.get('/show-companies', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const q = request.query as { month?: string; status?: string }
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const monthFilter = q.month && /^\d{4}-\d{2}$/.test(q.month)
+        ? sql`AND to_char(D.show_date, 'YYYY-MM') = ${q.month}`
+        : sql``
+      const statusFilter = q.status === 'active'
+        ? sql`AND D.admittance_date >= CURRENT_DATE`
+        : q.status === 'inactive'
+          ? sql`AND (D.admittance_date IS NULL OR D.admittance_date < CURRENT_DATE)`
+          : sql``
+      const rows = await sql`
+        SELECT C.company_key, C.id, C.company, C.city, C.country, C.tariff,
+               to_char(D.show_date, 'YYYY-MM') AS month,
+               D.show_date, D.admittance_date,
+               (D.admittance_date >= CURRENT_DATE) AS active
+        FROM provider.company_detail AS D
+        JOIN provider.company AS C ON C.company_key = D.company_key
+        WHERE D.show_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+          AND D.show_date <= CURRENT_DATE
+          ${monthFilter}
+          ${statusFilter}
+        ORDER BY D.show_date DESC, C.company
+      `
+      return reply.send(rows)
+    } finally {
+      await sql.end()
+    }
+  })
+
   // GET /api/statistics/orders-monthly — vytvořené zakázky per měsíc (manuální / digitální), 36 měsíců
   app.get('/orders-monthly', {
     onRequest: [(app as any).authenticate],

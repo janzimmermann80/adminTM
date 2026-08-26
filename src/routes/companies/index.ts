@@ -981,22 +981,32 @@ export async function companiesRoutes(app: FastifyInstance) {
     }
   })
 
-  // GET /api/companies/:id/notes
+  // GET /api/companies/:id/notes  (?years=N → poznámky za posledních N let, bez limitu)
   app.get('/:id/notes', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { userDb, passwordDb } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
     const { id } = request.params as { id: string }
+    const { years } = request.query as { years?: string }
+    const y = Math.min(Math.max(parseInt(years ?? '', 10) || 0, 0), 20)
 
     try {
-      const rows = await sql`
-        SELECT note_key, creator, creation_date, type, text
-        FROM provider.note
-        WHERE company_key = ${id}
-        ORDER BY creation_date DESC
-        LIMIT 100
-      `
+      const rows = y > 0
+        ? await sql`
+            SELECT note_key, creator, creation_date, type, text
+            FROM provider.note
+            WHERE company_key = ${id}
+              AND creation_date >= NOW() - make_interval(years => ${y})
+            ORDER BY creation_date DESC
+          `
+        : await sql`
+            SELECT note_key, creator, creation_date, type, text
+            FROM provider.note
+            WHERE company_key = ${id}
+            ORDER BY creation_date DESC
+            LIMIT 100
+          `
       return reply.send(rows)
     } finally {
       await sql.end()

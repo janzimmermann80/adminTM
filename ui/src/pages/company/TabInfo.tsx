@@ -264,11 +264,13 @@ export const TabInfo = ({ company, onReload }: Props) => {
                       className="shrink-0 flex items-center rounded-lg border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-40 text-gray-600 px-2 h-8 text-xs">
                       {cinLookupLoading ? <Spinner size={3} /> : 'Doplnit'}
                     </button>
-                    <a href={`https://ares.gov.cz/ekonomicke-subjekty?ico=${encodeURIComponent(basic.cin.trim())}`} target="_blank" rel="noreferrer"
-                      title="Ověřit v ARES (CZ)" onClick={e => e.stopPropagation()}
-                      className="shrink-0 text-xs text-[#0a6b6b] hover:underline px-1">ARES</a>
+                    {basic.country.trim().toUpperCase() !== 'SK' && (
+                      <a href={`https://ares.gov.cz/ekonomicke-subjekty?ico=${encodeURIComponent(basic.cin.trim())}`} target="_blank" rel="noreferrer"
+                        title="Ověřit v ARES (CZ)" onClick={e => e.stopPropagation()}
+                        className="shrink-0 text-xs text-[#0a6b6b] hover:underline px-1">ARES</a>
+                    )}
                     {basic.country.trim().toUpperCase() === 'SK' && (
-                      <a href={`https://finstat.sk/firma/${encodeURIComponent(basic.cin.trim())}`} target="_blank" rel="noreferrer"
+                      <a href={`https://finstat.sk/${encodeURIComponent(basic.cin.trim())}`} target="_blank" rel="noreferrer"
                         title="Otevřít ve FinStat (SK)" onClick={e => e.stopPropagation()}
                         className="shrink-0 text-xs text-[#0a6b6b] hover:underline px-1">FinStat</a>
                     )}

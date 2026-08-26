@@ -80,6 +80,13 @@ export const getStatsDiaryByOwner = () => get<any[]>('/statistics/diary-by-owner
 export const getStatsLentMonthly = () => get<any[]>('/statistics/lent-monthly')
 export const getStatsOrdersMonthly = () => get<any[]>('/statistics/orders-monthly')
 export const getStatsLentAccessStats = () => get<any>('/statistics/lent-access-stats')
+export const getStatsShowMonthly = () => get<any[]>('/statistics/show-monthly')
+export const getStatsShowCompanies = (month?: string, status?: 'active' | 'inactive') => {
+  const p = new URLSearchParams()
+  if (month) p.set('month', month)
+  if (status) p.set('status', status)
+  return get<any[]>(`/statistics/show-companies${p.toString() ? `?${p}` : ''}`)
+}
 export const getStatsLentCompanies = (params: { status?: 'active' | 'inactive'; month?: string; trial?: boolean } = {}) => {
   const p = new URLSearchParams()
   if (params.status)            p.set('status', params.status)
@@ -204,7 +211,8 @@ export const extendAccess = (id: string, months: number) =>
   post<{ admittance_date: string }>(`/companies/${id}/extend-access`, { months })
 
 // notes
-export const getNotes = (id: string) => get<any[]>(`/companies/${id}/notes`)
+export const getNotes = (id: string, years?: number) =>
+  get<any[]>(`/companies/${id}/notes${years ? `?years=${years}` : ''}`)
 export const addNote = (id: string, body: Record<string, any>) => post<any>(`/companies/${id}/notes`, body)
 export const updateNote = (id: string, nid: string, body: Record<string, any>) =>
   put<any>(`/companies/${id}/notes/${nid}`, body)

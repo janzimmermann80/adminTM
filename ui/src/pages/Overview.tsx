@@ -14,6 +14,8 @@ import {
   getStatsExpiredAccess,
   getStatsOverdueCompanies,
   getStatsLentCompanies,
+  getStatsShowMonthly,
+  getStatsShowCompanies,
 } from '../api'
 import { formatDate, formatNumber } from '../utils'
 
@@ -49,39 +51,55 @@ const Tile = ({
   )
 }
 
-// ── Lent monthly chart (36 months) ───────────────────────────────────────────
+// ── Lent monthly chart (36 months) + Prezentace vedle ────────────────────────
 
-const LentChart = ({ data, onSelect, selected }: {
+const LentChart = ({ data, showData, onSelect, selected, onShowSelect, showSelected }: {
   data: { month: string; count: number; active: number; active_trial: number }[]
+  showData: { month: string; count: number; active: number }[]
   onSelect?: (month: string, status: 'trial' | 'paid' | 'inactive') => void
   selected?: { month: string; status: 'trial' | 'paid' | 'inactive' | 'active' } | null
+  onShowSelect?: (month: string, status?: 'active' | 'inactive') => void
+  showSelected?: { month: string; status?: 'active' | 'inactive' } | null
 }) => {
   if (data.length === 0) return <div className="h-24 flex items-center justify-center text-sm text-gray-400">Načítání…</div>
 
-  const max = Math.max(...data.map(d => d.count), 1)
+  const showByMonth = new Map(showData.map(s => [s.month, s]))
+  const max = Math.max(...data.map(d => d.count), ...showData.map(s => s.count), 1)
   const chartH = 120
   const labelH = 28
   const valH   = 14
   const totalH = chartH + labelH + valH + 6
-  const gap    = 3
+  const gap    = 3   // mezera mezi měsíci
+  const pairGap = 2  // mezera mezi sloupcem registrace a prezentace
   const n      = data.length
-  const W      = 800
-  const barW   = Math.floor((W - (n - 1) * gap) / n)
+  const W      = 1200
+  // šířka dvojice (registrace + prezentace) na měsíc
+  const groupW = Math.floor((W - (n - 1) * gap) / n)
+  const barW   = Math.max(1, Math.floor((groupW - pairGap) / 2))
 
   const sel = (m: string, s: string) => selected?.month === m && selected?.status === s
 
   return (
     <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${totalH}`} style={{ minWidth: 600, width: '100%', height: totalH }}>
+      <svg viewBox={`0 0 ${W} ${totalH}`} style={{ minWidth: 700, width: '100%', height: totalH }}>
         {data.map((d, i) => {
+          const sh = showByMonth.get(d.month)
+          const sCount = sh?.count ?? 0
+          const sActive = sh?.active ?? 0
           const barH  = d.count > 0 ? Math.max((d.count / max) * chartH, 3) : 0
           const actH  = d.count > 0 ? (d.active / d.count) * barH : 0
           const triH  = d.count > 0 ? (d.active_trial / d.count) * barH : 0
           const paidH = actH - triH
-          const x    = i * (barW + gap)
+          const sBarH = sCount > 0 ? Math.max((sCount / max) * chartH, 3) : 0
+          const sActH = sCount > 0 ? (sActive / sCount) * sBarH : 0
+          const sInactH = sBarH - sActH
+          const x    = i * (groupW + gap)
           const y    = chartH - barH
+          const sX   = x + barW + pairGap
+          const sY   = chartH - sBarH
           const [yr, mo] = d.month.split('-')
           const isJan = mo === '01'
+          const isShowSel = (st?: string) => showSelected?.month === d.month && showSelected?.status === st
 
           return (
             <g key={d.month}>
@@ -90,14 +108,14 @@ const LentChart = ({ data, onSelect, selected }: {
                 <line x1={x - gap / 2} y1={0} x2={x - gap / 2} y2={chartH + labelH + valH + 6}
                   stroke="#e5e7eb" strokeWidth={1} />
               )}
-              {/* základ — bez přístupu (neaktivní) */}
+              {/* registrace — neaktivní */}
               <rect x={x} y={y} width={barW} height={barH}
                 fill={isJan ? '#0d8080' : '#0a6b6b'} rx={1} opacity={d.count > 0 ? 1 : 0}
                 style={onSelect ? { cursor: 'pointer' } : undefined}
                 stroke={sel(d.month, 'inactive') ? '#0a6b6b' : 'none'}
                 strokeWidth={sel(d.month, 'inactive') ? 2 : 0}
                 onClick={onSelect ? () => onSelect(d.month, 'inactive') : undefined} />
-              {/* aktivní — ostatní (paid) */}
+              {/* registrace — aktivní (paid) */}
               {paidH > 0 && (
                 <rect x={x} y={y} width={barW} height={paidH}
                   fill="#5eead4"
@@ -106,7 +124,7 @@ const LentChart = ({ data, onSelect, selected }: {
                   strokeWidth={sel(d.month, 'paid') ? 2 : 0}
                   onClick={onSelect ? () => onSelect(d.month, 'paid') : undefined} />
               )}
-              {/* aktivní — zkušební (trial) */}
+              {/* registrace — zkušební (trial) */}
               {triH > 0 && (
                 <rect x={x} y={y + paidH} width={barW} height={triH}
                   fill="#f59e0b"
@@ -115,19 +133,37 @@ const LentChart = ({ data, onSelect, selected }: {
                   strokeWidth={sel(d.month, 'trial') ? 2 : 0}
                   onClick={onSelect ? () => onSelect(d.month, 'trial') : undefined} />
               )}
+              {/* prezentace — neaktivní (spodní část) */}
+              {sBarH > 0 && (
+                <rect x={sX} y={sY} width={barW} height={sBarH}
+                  fill="#6366f1" rx={1}
+                  style={onShowSelect ? { cursor: 'pointer' } : undefined}
+                  stroke={isShowSel(undefined) && !showSelected?.status ? '#4338ca' : isShowSel('inactive') ? '#4338ca' : 'none'}
+                  strokeWidth={isShowSel('inactive') ? 2 : 0}
+                  onClick={onShowSelect ? () => onShowSelect(d.month, 'inactive') : undefined} />
+              )}
+              {/* prezentace — aktivní (horní část) */}
+              {sActH > 0 && (
+                <rect x={sX} y={sY} width={barW} height={sActH}
+                  fill="#a5b4fc" rx={1}
+                  style={onShowSelect ? { cursor: 'pointer' } : undefined}
+                  stroke={isShowSel('active') ? '#4338ca' : 'none'}
+                  strokeWidth={isShowSel('active') ? 2 : 0}
+                  onClick={onShowSelect ? () => onShowSelect(d.month, 'active') : undefined} />
+              )}
               {/* value above bar */}
               {d.count > 0 && (
                 <text x={x + barW / 2} y={y - 3} textAnchor="middle" fontSize={9} fill="#374151">
                   {d.count}
                 </text>
               )}
-              {/* month label */}
-              <text x={x + barW / 2} y={chartH + valH + 2} textAnchor="middle" fontSize={8} fill="#9ca3af">
+              {/* month label — uprostřed dvojice */}
+              <text x={x + (barW * 2 + pairGap) / 2} y={chartH + valH + 2} textAnchor="middle" fontSize={8} fill="#9ca3af">
                 {mo}
               </text>
               {/* year label — only on January */}
               {isJan && (
-                <text x={x + barW / 2} y={chartH + valH + 14} textAnchor="middle" fontSize={9}
+                <text x={x + (barW * 2 + pairGap) / 2} y={chartH + valH + 14} textAnchor="middle" fontSize={9}
                   fontWeight="600" fill="#4b5563">
                   {yr}
                 </text>
@@ -248,6 +284,11 @@ export const Overview = () => {
   const [lentMonth, setLentMonth]               = useState<string | null>(null)
   const [lentList, setLentList]                 = useState<any[] | null>(null)
   const [lentLoading, setLentLoading]           = useState(false)
+  const [show, setShow]                         = useState<any[]>([])
+  const [showMonth, setShowMonth]               = useState<string | null>(null)
+  const [showStatus, setShowStatus]             = useState<'active' | 'inactive' | null>(null)
+  const [showList, setShowList]                 = useState<any[] | null>(null)
+  const [showLoading, setShowLoading]           = useState(false)
   const [modalKey, setModalKey]                 = useState<string | null>(null)
   const [modalTab, setModalTab]                 = useState<string>('info')
 
@@ -259,6 +300,7 @@ export const Overview = () => {
       getStatsDiaryByOwner().then(setDiaryBy),
       getStatsLentMonthly().then(setLent),
       getStatsLentAccessStats().then(setLentAccess),
+      getStatsShowMonthly().then(setShow),
       initials ? getDiaryUpcoming(initials).then((r: any) => setDiary(r.data ?? [])) : Promise.resolve(),
     ]).finally(() => setLoading(false))
   }, [])
@@ -324,6 +366,20 @@ export const Overview = () => {
   // klik na sloupec grafu — přepne status a nastaví měsíc
   const handleLentBarSelect = (month: string, status: 'trial' | 'paid' | 'inactive') =>
     handleLentToggle(status, month)
+
+  // Prezentace — klik na sloupec / legendu
+  const handleShowToggle = (month?: string, status?: 'active' | 'inactive') => {
+    const m = month ?? null
+    const st = status ?? null
+    if (showMonth === m && showStatus === st && showList !== null) { setShowMonth(null); setShowStatus(null); setShowList(null); return }
+    setShowMonth(m)
+    setShowStatus(st)
+    setShowLoading(true)
+    getStatsShowCompanies(m ?? undefined, st ?? undefined)
+      .then(setShowList)
+      .catch(() => setShowList([]))
+      .finally(() => setShowLoading(false))
+  }
 
   if (loading) {
     return (
@@ -607,6 +663,17 @@ export const Overview = () => {
                 <span className="inline-block w-3 h-3 rounded-sm bg-[#0a6b6b]" />
                 Neaktivní ({lent.reduce((s, m) => s + (m.count - (m.active ?? 0)), 0).toLocaleString('cs-CZ')})
               </button>
+              <button
+                onClick={() => handleShowToggle()}
+                title="Zobrazit firmy s prezentací"
+                className={`flex items-center gap-1.5 px-2 py-1 rounded transition-colors ${showList !== null && showMonth === null && showStatus === null ? 'bg-indigo-100 text-indigo-700 font-medium' : 'hover:bg-gray-100'}`}
+              >
+                <span className="inline-block w-3 h-3 rounded-sm bg-[#6366f1]" />
+                Prezentace ({show.reduce((s, m) => s + (m.count ?? 0), 0).toLocaleString('cs-CZ')})
+              </button>
+              <span className="text-[11px] text-gray-400">
+                · aktivní {show.reduce((s, m) => s + (m.active ?? 0), 0).toLocaleString('cs-CZ')} / neaktivní {show.reduce((s, m) => s + ((m.count ?? 0) - (m.active ?? 0)), 0).toLocaleString('cs-CZ')}
+              </span>
             </div>
             <span className="text-xs text-gray-400">{lent.reduce((s, m) => s + m.count, 0).toLocaleString('cs-CZ')} celkem</span>
           </div>
@@ -631,8 +698,11 @@ export const Overview = () => {
           <div className="flex-1 min-w-0">
             <LentChart
               data={lent}
+              showData={show}
               onSelect={handleLentBarSelect}
               selected={lentStatus && lentMonth ? { month: lentMonth, status: lentStatus } : null}
+              onShowSelect={(m, st) => handleShowToggle(m, st)}
+              showSelected={showList !== null && showMonth ? { month: showMonth, status: showStatus ?? undefined } : null}
             />
           </div>
         </div>
@@ -688,6 +758,64 @@ export const Overview = () => {
                       </tr>
                     ))}
                     {(lentList ?? []).length === 0 && (
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Žádné firmy</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Seznam firem s prezentací */}
+        {showList !== null && (
+          <div className="mt-4 border-t border-gray-100 pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-gray-600">
+                Firmy s prezentací
+                {showMonth && <span className="ml-1 font-normal text-indigo-600">· {showMonth.split('-')[1]}.{showMonth.split('-')[0]}</span>}
+                {showStatus && <span className="ml-1 font-normal text-indigo-600">· {showStatus === 'active' ? 'aktivní' : 'neaktivní'}</span>}
+                <span className="ml-2 font-normal text-gray-400">{showList.length} firem</span>
+              </span>
+              <button onClick={() => { setShowMonth(null); setShowStatus(null); setShowList(null) }} className="text-xs text-gray-400 hover:text-gray-600">Zavřít</button>
+            </div>
+            {showLoading ? (
+              <div className="flex justify-center py-6"><Spinner size={8} /></div>
+            ) : (
+              <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-white">
+                    <tr className="bg-gray-50 text-left text-xs text-gray-500 uppercase tracking-wide">
+                      <th className="px-4 py-2 font-medium">ID</th>
+                      <th className="px-4 py-2 font-medium">Firma</th>
+                      <th className="px-4 py-2 font-medium hidden md:table-cell">Město</th>
+                      <th className="px-4 py-2 font-medium hidden lg:table-cell">Stát</th>
+                      <th className="px-4 py-2 font-medium">Prezentace</th>
+                      <th className="px-4 py-2 font-medium hidden lg:table-cell">Přístup do</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {showList.map((c: any) => (
+                      <tr
+                        key={c.company_key}
+                        onClick={() => { setModalTab('info'); setModalKey(c.company_key) }}
+                        className="hover:bg-indigo-50 cursor-pointer transition-colors"
+                      >
+                        <td className="px-4 py-2 text-gray-400 font-mono text-xs">{c.id}</td>
+                        <td className="px-4 py-2 font-medium text-gray-900">
+                          <a href={`#/company/${c.company_key}`} target="_blank" rel="noreferrer"
+                            onClick={e => e.stopPropagation()} className="hover:text-indigo-700 hover:underline"
+                          >{c.company}</a>
+                        </td>
+                        <td className="px-4 py-2 text-gray-600 hidden md:table-cell text-xs">{c.city}</td>
+                        <td className="px-4 py-2 hidden lg:table-cell text-xs text-gray-500">{c.country}</td>
+                        <td className="px-4 py-2 text-xs font-medium text-indigo-700">{formatDate(c.show_date)}</td>
+                        <td className={`px-4 py-2 hidden lg:table-cell text-xs font-medium ${c.active ? 'text-[#0a6b6b]' : 'text-gray-400'}`}>
+                          {c.admittance_date ? formatDate(c.admittance_date) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                    {showList.length === 0 && (
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Žádné firmy</td></tr>
                     )}
                   </tbody>
