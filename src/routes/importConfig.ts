@@ -54,11 +54,13 @@ export function getImportConfig(importType: string): ImportTypeConfig {
 }
 
 // Připravená pole pro unnest(...) v SQL — pro batch join všech typů.
+// no_gps posíláme jako int (0/1), protože postgres.js má problém se serializací
+// boolean[] parametru ("cannot cast type boolean to boolean[]").
 const _types = Object.keys(IMPORT_TYPE_CONFIG)
 export const CONFIG_ARRAYS = {
   types:       _types,
   cadence_min: _types.map(t => IMPORT_TYPE_CONFIG[t].cadence_min),
   silent_min:  _types.map(t => IMPORT_TYPE_CONFIG[t].silent_min),
   gone_days:   _types.map(t => IMPORT_TYPE_CONFIG[t].gone_days),
-  no_gps:      _types.map(t => IMPORT_TYPE_CONFIG[t].no_gps === true),
+  no_gps:      _types.map(t => IMPORT_TYPE_CONFIG[t].no_gps === true ? 1 : 0),
 }

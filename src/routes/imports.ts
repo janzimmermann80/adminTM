@@ -22,12 +22,17 @@ export async function importsRoutes(app: FastifyInstance) {
     try {
       const rows = await sql`
         WITH thresholds(import_type, silent_min, gone_days, no_gps) AS (
-          SELECT * FROM unnest(
+          SELECT
+            t.import_type,
+            t.silent_min,
+            t.gone_days,
+            t.no_gps_int <> 0                                          AS no_gps
+          FROM unnest(
             ${CONFIG_ARRAYS.types}::text[],
             ${CONFIG_ARRAYS.silent_min}::int[],
             ${CONFIG_ARRAYS.gone_days}::int[],
-            ${CONFIG_ARRAYS.no_gps}::bool[]
-          )
+            ${CONFIG_ARRAYS.no_gps}::int[]
+          ) AS t(import_type, silent_min, gone_days, no_gps_int)
         )
         SELECT
           s.company_key,
