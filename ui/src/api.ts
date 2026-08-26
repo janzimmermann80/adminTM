@@ -445,6 +445,12 @@ export type ImportServiceRow = {
   last_import_time: string | null
   last_error: string | null
   suspended_on: string | null
+  newest_rec: string | null
+  total_cars: number
+  cars_with_error: number
+  silent_min: number
+  gone_days: number
+  no_gps: boolean
   status: ImportStatus
 }
 

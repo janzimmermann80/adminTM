@@ -28,6 +28,13 @@ const relativeAge = (s: string | null): string => {
   return `${d} d`
 }
 
+// "20 min", "12 h", "2 d" — pro zobrazení očekávané tolerance (silent threshold).
+const fmtDurationMin = (mins: number): string => {
+  if (mins < 60)      return `${mins} min`
+  if (mins < 60 * 48) return `${Math.round(mins / 60)} h`
+  return `${Math.round(mins / (60 * 24))} d`
+}
+
 const STATUS_BADGE: Record<ImportStatus, string> = {
   ok:        'bg-emerald-100 text-emerald-800 border-emerald-200',
   error:     'bg-red-100 text-red-800 border-red-200',
@@ -111,6 +118,11 @@ const CarsModal = ({ row, onClose }: CarsModalProps) => {
               {row.company_name ?? `#${row.company_key}`} <span className="text-gray-400">·</span>{' '}
               <span className="font-mono text-teal-700">{row.import_type}</span>
               {row.import_name && <span className="text-gray-500 font-normal ml-2">({row.import_name})</span>}
+            </div>
+            <div className="text-xs text-gray-500 mt-1">
+              {row.no_gps
+                ? 'Import bez GPS dat'
+                : `Očekávaná tolerance: tichá pauza ${fmtDurationMin(row.silent_min)}, ztraceno z fleetu ${row.gone_days} d`}
             </div>
           </div>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-800 p-1"><IconClose /></button>
@@ -286,10 +298,11 @@ export const Imports = () => {
                     <th className="px-3 py-2 text-left border-b">Firma</th>
                     <th className="px-3 py-2 text-left border-b">Typ importu</th>
                     <th className="px-3 py-2 text-left border-b">Účet u dodavatele</th>
-                    <th className="px-3 py-2 text-left border-b whitespace-nowrap">Poslední běh</th>
+                    <th className="px-3 py-2 text-left border-b whitespace-nowrap">Poslední aktivita</th>
+                    <th className="px-3 py-2 text-right border-b whitespace-nowrap">Auta</th>
                     <th className="px-3 py-2 text-left border-b">Poslední chyba</th>
                     <th className="px-3 py-2 text-left border-b whitespace-nowrap">Pozastaveno</th>
-                    <th className="px-3 py-2 text-right border-b whitespace-nowrap">Auta</th>
+                    <th className="px-3 py-2 text-right border-b whitespace-nowrap">Detail</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -315,16 +328,35 @@ export const Imports = () => {
                         <td className="px-3 py-2">
                           <div className="font-mono font-medium text-teal-700">{r.import_type}</div>
                           {r.import_name && <div className="text-xs text-gray-500">{r.import_name}</div>}
+                          <div className="text-[10px] text-gray-400 mt-0.5">
+                            {r.no_gps ? 'bez GPS' : `tolerance ${fmtDurationMin(r.silent_min)}`}
+                          </div>
                         </td>
                         <td className="px-3 py-2 text-xs">
                           {r.comp_id && <div className="font-mono">{r.comp_id}</div>}
                           {r.comp_name && <div className="text-gray-500">{r.comp_name}</div>}
                         </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs" title={r.last_import_time ?? ''}>
-                          {fmtTs(r.last_import_time) || <span className="text-gray-400">nikdy</span>}
-                          {r.last_import_time && (
-                            <div className="text-gray-400">{relativeAge(r.last_import_time)}</div>
-                          )}
+                        <td className="px-3 py-2 whitespace-nowrap text-xs" title={`servis: ${r.last_import_time ?? '-'} | nejnovější pozice: ${r.newest_rec ?? '-'}`}>
+                          {(() => {
+                            const rec = r.newest_rec ? new Date(r.newest_rec).getTime() : 0
+                            const svc = r.last_import_time ? new Date(r.last_import_time).getTime() : 0
+                            const pick = rec >= svc ? r.newest_rec : r.last_import_time
+                            if (!pick) return <span className="text-gray-400">nikdy</span>
+                            return <>
+                              {fmtTs(pick)}
+                              <div className="text-gray-400">{relativeAge(pick)}</div>
+                            </>
+                          })()}
+                        </td>
+                        <td className="px-3 py-2 text-right text-xs tabular-nums">
+                          {r.total_cars > 0 ? (
+                            <>
+                              <div>{r.total_cars}</div>
+                              {r.cars_with_error > 0 && (
+                                <div className="text-red-600">{r.cars_with_error} s chybou</div>
+                              )}
+                            </>
+                          ) : <span className="text-gray-400">0</span>}
                         </td>
                         <td className="px-3 py-2 text-red-700 text-xs max-w-[320px] truncate" title={r.last_error ?? ''}>
                           {r.last_error ?? ''}

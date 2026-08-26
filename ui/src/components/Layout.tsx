@@ -121,7 +121,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Kampaně',         icon: <IconCampaign />,   disabled: true },
   { label: 'AI asistent',     icon: <IconAI />,         disabled: true },
   { to: '/bank',              label: 'Banka',           icon: <IconBank /> },
-  { to: '/imports',           label: 'Importy',         icon: <IconImport /> },
+  { to: '/imports',           label: 'Importy GPS',     icon: <IconImport /> },
   { to: '/queries',           label: 'Dotazy',          icon: <IconQueries /> },
 ]
 
