@@ -108,6 +108,13 @@ export const createDiaryEntry = (body: { owner: string; company_key: number; tim
 export const updateDiaryEntry = (id: number, text: string, time?: string) =>
   put<{ success: boolean }>(`/diary/${id}`, { text, ...(time ? { time } : {}) })
 
+// ── Google Calendar ───────────────────────────────────────────────────────────
+export const getGcalStatus = () => get<{ connected: boolean }>('/gcal/status')
+export const getGcalAuthUrl = () => get<{ url: string }>('/gcal/auth-url')
+export const disconnectGcal = () => del<{ success: boolean }>('/gcal/disconnect')
+export const getGcalEvents = (date: string, days: number) =>
+  get<{ connected: boolean; items: any[] }>(`/gcal/events?date=${date}&days=${days}`)
+
 // ── Companies ─────────────────────────────────────────────────────────────────
 
 export const getCompany = (id: string) => get<any>(`/companies/${id}`)

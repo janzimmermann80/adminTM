@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getUserSql } from '../db/userSql.js'
+import { gcalCreateFor, gcalUpdateFor, gcalDeleteFor } from '../services/gcal.js'
 
 interface DiaryQuery {
   owner?: string
@@ -80,6 +81,11 @@ export async function diaryRoutes(app: FastifyInstance) {
         VALUES (${body.owner}, ${provider}, ${body.time}, ${body.text}, '0', '0', ${body.company_key}, ${initials})
         RETURNING diary_key
       `
+      // sync do Google Kalendáře (tiše přeskočit, když není propojeno)
+      try {
+        const [comp] = await sql`SELECT company FROM provider.company WHERE company_key = ${body.company_key}`
+        await gcalCreateFor(row.diary_key, { time: body.time, text: body.text, company: comp?.company })
+      } catch {}
       return reply.code(201).send(row)
     } finally {
       await sql.end()
@@ -102,6 +108,14 @@ export async function diaryRoutes(app: FastifyInstance) {
           text = COALESCE(${body.text ?? null}, text)
         WHERE diary_key = ${id}
       `
+      // sync do Google Kalendáře
+      try {
+        const [d] = await sql`
+          SELECT D.time, D.text, C.company
+          FROM provider.diary D JOIN provider.company C ON C.company_key = D.company_key
+          WHERE D.diary_key = ${id}`
+        if (d) await gcalUpdateFor(id, { time: d.time, text: d.text, company: d.company })
+      } catch {}
       return reply.send({ success: true })
     } finally {
       await sql.end()
@@ -137,6 +151,7 @@ export async function diaryRoutes(app: FastifyInstance) {
 
     try {
       await sql`DELETE FROM provider.diary WHERE diary_key = ${id}`
+      try { await gcalDeleteFor(id) } catch {}
       return reply.send({ success: true })
     } finally {
       await sql.end()

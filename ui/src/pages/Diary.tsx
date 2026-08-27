@@ -6,6 +6,7 @@ import { formatDate } from '../utils'
 import {
   getDiaryWindow, getDiaryEmployees,
   completeDiaryEntry, updateDiaryEntry,
+  getGcalStatus, getGcalAuthUrl, disconnectGcal,
 } from '../api'
 import { CompanyDetailPanel } from './company/CompanyDetailPanel'
 
@@ -54,6 +55,12 @@ export const Diary = () => {
   const editRef = useRef<HTMLTextAreaElement>(null)
 
   const canViewOthers = user?.accessRights?.[14] === '1'
+
+  // Google Calendar
+  const [gcalConnected, setGcalConnected] = useState(false)
+  useEffect(() => {
+    getGcalStatus().then(s => setGcalConnected(s.connected)).catch(() => {})
+  }, [])
 
   // Načtení zaměstnanců
   useEffect(() => {
@@ -177,6 +184,34 @@ export const Diary = () => {
               </svg>
             </button>
           </div>
+
+          {/* Google Kalendář propojení */}
+          {gcalConnected ? (
+            <button
+              onClick={() => { if (confirm('Odpojit Google Kalendář?')) disconnectGcal().then(() => setGcalConnected(false)) }}
+              title="Google Kalendář propojen — klik pro odpojení"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-green-300 bg-green-50 text-green-700 text-xs font-medium transition-colors hover:bg-green-100"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2zm0 16H5V10h14v10zM5 8V6h14v2H5z"/>
+              </svg>
+              Kalendář
+            </button>
+          ) : (
+            <button
+              onClick={async () => {
+                try { const { url } = await getGcalAuthUrl(); window.location.href = url }
+                catch (e: any) { setError(e.message ?? 'Chyba propojení') }
+              }}
+              title="Propojit Google Kalendář"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 text-xs font-medium transition-colors hover:bg-gray-50"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 4h-1V2h-2v2H8V2H6v2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V6a2 2 0 00-2-2zm0 16H5V10h14v10zM5 8V6h14v2H5z"/>
+              </svg>
+              Propojit Kalendář
+            </button>
+          )}
         </div>
 
         {error && (
