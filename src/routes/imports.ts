@@ -38,6 +38,7 @@ export async function importsRoutes(app: FastifyInstance) {
           s.company_key,
           c.id                                    AS company_id,
           c.company                               AS company_name,
+          (c.company_key IS NULL)                 AS orphan_company,
           s.import_type,
           a.name                                  AS import_name,
           s.comp_id,
@@ -47,7 +48,10 @@ export async function importsRoutes(app: FastifyInstance) {
           s.suspended_on,
           ca.newest_rec,
           ca.total_cars,
+          ca.active_cars,
           ca.cars_with_error,
+          ca.inactive_cars,
+          ca.retired_cars,
           COALESCE(th.silent_min, ${DEFAULT_IMPORT_CONFIG.silent_min}) AS silent_min,
           COALESCE(th.gone_days,  ${DEFAULT_IMPORT_CONFIG.gone_days})  AS gone_days,
           COALESCE(th.no_gps, FALSE)                                   AS no_gps,
@@ -75,12 +79,34 @@ export async function importsRoutes(app: FastifyInstance) {
         LEFT JOIN thresholds th USING (import_type)
         LEFT JOIN LATERAL (
           -- PK prefix scan (company_key, import_type) → per-řádek malý index range,
-          -- nikoli scan celé gps.import_car.
+          -- nikoli scan celé gps.import_car. Zároveň LEFT JOIN na car_base po PK
+          -- (car_key, company_key), abychom uměli rozlišit vyřazené/neexistující vozy.
           SELECT
-            MAX(ic.last_imported_rec_time)                                AS newest_rec,
-            COUNT(*)                                                      AS total_cars,
-            COUNT(*) FILTER (WHERE ic.last_error IS NOT NULL)             AS cars_with_error
+            MAX(ic.last_imported_rec_time)                                    AS newest_rec,
+            COUNT(*)                                                          AS total_cars,
+            -- active = spárováno s existujícím a nedeaktivovaným car_base, případně dosud nespárováno
+            COUNT(*) FILTER (
+              WHERE (ic.car_key IS NULL)
+                 OR (cb.car_key IS NOT NULL AND COALESCE(cb.inactive, FALSE) = FALSE)
+            )                                                                 AS active_cars,
+            -- errory se počítají jen na aktivních vozech (viz vyřazená/neaktivní níže)
+            COUNT(*) FILTER (
+              WHERE ic.last_error IS NOT NULL
+                AND ((ic.car_key IS NULL)
+                  OR (cb.car_key IS NOT NULL AND COALESCE(cb.inactive, FALSE) = FALSE))
+            )                                                                 AS cars_with_error,
+            -- inactive = car_base existuje, ale je označen inactive=true
+            COUNT(*) FILTER (
+              WHERE cb.car_key IS NOT NULL AND cb.inactive = TRUE
+            )                                                                 AS inactive_cars,
+            -- retired = import_car má car_key, ale car_base řádek chybí (auto smazáno)
+            COUNT(*) FILTER (
+              WHERE ic.car_key IS NOT NULL AND cb.car_key IS NULL
+            )                                                                 AS retired_cars
           FROM gps.import_car ic
+          LEFT JOIN gps.car_base cb
+                 ON cb.car_key     = ic.car_key
+                AND cb.company_key = ic.company_key
           WHERE ic.company_key = s.company_key
             AND ic.import_type = s.import_type
         ) ca ON TRUE
@@ -143,11 +169,14 @@ export async function importsRoutes(app: FastifyInstance) {
           c.spz,
           c.vin,
           c.inactive,
+          -- rozliš, jestli je car_base fyzicky přítomný (retired = kdysi spárováno, dnes chybí)
+          (i.car_key IS NOT NULL AND c.car_key IS NULL)     AS retired,
           i.last_imported_rec_time,
           i.last_car_import_time,
           i.last_import_time,
           i.last_error,
           CASE
+            WHEN i.car_key IS NOT NULL AND c.car_key IS NULL                         THEN 'retired'
             WHEN c.inactive                                                          THEN 'inactive'
             WHEN i.last_error IS NOT NULL                                            THEN 'error'
             WHEN i.last_car_import_time IS NULL                                      THEN 'gone-from-vendor'
@@ -157,18 +186,21 @@ export async function importsRoutes(app: FastifyInstance) {
             ELSE                                                                          'ok'
           END AS car_status
         FROM gps.import_car i
-        LEFT JOIN gps.car_base c USING (car_key, company_key)
+        LEFT JOIN gps.car_base c
+               ON c.car_key     = i.car_key
+              AND c.company_key = i.company_key
         WHERE i.company_key  = ${companyKey}
           AND i.import_type  = ${import_type}
         ORDER BY
           CASE
+            WHEN i.car_key IS NOT NULL AND c.car_key IS NULL                         THEN 6
             WHEN c.inactive                                                          THEN 5
             WHEN i.last_error IS NOT NULL                                            THEN 1
             WHEN i.last_car_import_time IS NULL
               OR i.last_car_import_time  < now() - ${goneDays}  * interval '1 day'   THEN 2
             WHEN i.last_imported_rec_time IS NULL
               OR i.last_imported_rec_time < now() - ${silentMin} * interval '1 minute' THEN 3
-            ELSE                                                                  4
+            ELSE                                                                          4
           END,
           i.ext_id
       `

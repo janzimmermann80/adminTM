@@ -447,6 +447,7 @@ export type ImportServiceRow = {
   company_key: number
   company_id: string | null
   company_name: string | null
+  orphan_company: boolean
   import_type: string
   import_name: string | null
   comp_id: string | null
@@ -456,14 +457,17 @@ export type ImportServiceRow = {
   suspended_on: string | null
   newest_rec: string | null
   total_cars: number
+  active_cars: number
   cars_with_error: number
+  inactive_cars: number
+  retired_cars: number
   silent_min: number
   gone_days: number
   no_gps: boolean
   status: ImportStatus
 }
 
-export type ImportCarStatus = 'ok' | 'error' | 'silent' | 'gone-from-vendor' | 'inactive'
+export type ImportCarStatus = 'ok' | 'error' | 'silent' | 'gone-from-vendor' | 'inactive' | 'retired'
 
 export type ImportCarRow = {
   company_key: number
@@ -474,6 +478,7 @@ export type ImportCarRow = {
   spz: string | null
   vin: string | null
   inactive: boolean | null
+  retired: boolean
   last_imported_rec_time: string | null
   last_car_import_time: string | null
   last_import_time: string | null

@@ -1,4 +1,5 @@
 import React from 'react'
+import { Link } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/Spinner'
 import {
@@ -55,6 +56,7 @@ const CAR_STATUS_BADGE: Record<ImportCarStatus, string> = {
   silent:             'bg-amber-100 text-amber-800 border-amber-200',
   'gone-from-vendor': 'bg-orange-100 text-orange-800 border-orange-200',
   inactive:           'bg-gray-200 text-gray-500 border-gray-300',
+  retired:            'bg-gray-200 text-gray-500 border-gray-300',
 }
 
 const CAR_STATUS_LABEL: Record<ImportCarStatus, string> = {
@@ -63,7 +65,10 @@ const CAR_STATUS_LABEL: Record<ImportCarStatus, string> = {
   silent:             'Nevysílá',
   'gone-from-vendor': 'Zmizelo u dodavatele',
   inactive:           'Neaktivní',
+  retired:            'Vyřazeno (chybí v systému)',
 }
+
+const isCarRetiredOrInactive = (s: ImportCarStatus) => s === 'inactive' || s === 'retired'
 
 // ── Ikony ────────────────────────────────────────────────────────────────────
 
@@ -103,9 +108,58 @@ const CarsModal = ({ row, onClose }: CarsModalProps) => {
     return () => { alive = false }
   }, [row.company_key, row.import_type])
 
-  const visible = onlyProblems
-    ? cars.filter(c => c.car_status !== 'ok' && c.car_status !== 'inactive')
-    : cars
+  const activeCars  = cars.filter(c => !isCarRetiredOrInactive(c.car_status))
+  const retiredCars = cars.filter(c =>  isCarRetiredOrInactive(c.car_status))
+  const [showRetired, setShowRetired] = React.useState(false)
+
+  const visibleActive = onlyProblems
+    ? activeCars.filter(c => c.car_status !== 'ok')
+    : activeCars
+
+  const CarsTable = ({ list, muted }: { list: ImportCarRow[]; muted?: boolean }) => (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-xs border-collapse">
+        <thead>
+          <tr className="bg-gray-100 text-gray-600 uppercase tracking-wide text-[11px]">
+            <th className="px-2 py-2 text-left border-b whitespace-nowrap">Stav</th>
+            <th className="px-2 py-2 text-left border-b whitespace-nowrap">SPZ</th>
+            <th className="px-2 py-2 text-left border-b whitespace-nowrap">VIN</th>
+            <th className="px-2 py-2 text-left border-b whitespace-nowrap">ext_id</th>
+            <th className="px-2 py-2 text-left border-b whitespace-nowrap">ext_name</th>
+            <th className="px-2 py-2 text-left border-b whitespace-nowrap">Poslední pozice</th>
+            <th className="px-2 py-2 text-left border-b whitespace-nowrap">Poslední ve fleetu</th>
+            <th className="px-2 py-2 text-left border-b whitespace-nowrap">Poslední chyba</th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.map(c => (
+            <tr key={`${c.import_type}:${c.ext_id}`}
+                className={`border-b hover:bg-gray-50 ${muted ? 'text-gray-400' : ''}`}>
+              <td className="px-2 py-1.5">
+                <span className={`inline-block px-2 py-0.5 rounded border text-[11px] font-medium ${CAR_STATUS_BADGE[c.car_status]}`}>
+                  {CAR_STATUS_LABEL[c.car_status]}
+                </span>
+              </td>
+              <td className="px-2 py-1.5 font-mono">{c.spz ?? ''}</td>
+              <td className="px-2 py-1.5 font-mono text-gray-500">{c.vin ?? ''}</td>
+              <td className="px-2 py-1.5 font-mono">{c.ext_id}</td>
+              <td className="px-2 py-1.5">{c.ext_name ?? ''}</td>
+              <td className="px-2 py-1.5 whitespace-nowrap" title={c.last_imported_rec_time ?? ''}>
+                {fmtTs(c.last_imported_rec_time)}
+                {c.last_imported_rec_time && <span className="text-gray-400 ml-1">({relativeAge(c.last_imported_rec_time)})</span>}
+              </td>
+              <td className="px-2 py-1.5 whitespace-nowrap" title={c.last_car_import_time ?? ''}>
+                {fmtTs(c.last_car_import_time)}
+              </td>
+              <td className="px-2 py-1.5 max-w-[300px] truncate text-red-700" title={c.last_error ?? ''}>
+                {c.last_error ?? ''}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 
   return (
     <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/50 p-4 overflow-y-auto"
@@ -134,59 +188,39 @@ const CarsModal = ({ row, onClose }: CarsModalProps) => {
             Jen s problémem
           </label>
           <div className="text-gray-500">
-            Zobrazeno {visible.length} z {cars.length}
+            Aktivní: {visibleActive.length} z {activeCars.length}
+            {retiredCars.length > 0 && <span className="ml-3">Vyřazená/neaktivní: {retiredCars.length}</span>}
           </div>
         </div>
 
         <div className="p-2">
           {loading && <div className="flex justify-center py-12"><Spinner size={8} /></div>}
           {error && <div className="text-red-600 py-6 px-3 text-sm">{error}</div>}
-          {!loading && !error && visible.length === 0 && (
-            <div className="text-gray-400 py-8 px-3 text-sm">Žádná auta k zobrazení.</div>
+          {!loading && !error && cars.length === 0 && (
+            <div className="text-gray-400 py-8 px-3 text-sm">Žádná auta v importu.</div>
           )}
-          {!loading && !error && visible.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-gray-100 text-gray-600 uppercase tracking-wide text-[11px]">
-                    <th className="px-2 py-2 text-left border-b whitespace-nowrap">Stav</th>
-                    <th className="px-2 py-2 text-left border-b whitespace-nowrap">SPZ</th>
-                    <th className="px-2 py-2 text-left border-b whitespace-nowrap">VIN</th>
-                    <th className="px-2 py-2 text-left border-b whitespace-nowrap">ext_id</th>
-                    <th className="px-2 py-2 text-left border-b whitespace-nowrap">ext_name</th>
-                    <th className="px-2 py-2 text-left border-b whitespace-nowrap">Poslední pozice</th>
-                    <th className="px-2 py-2 text-left border-b whitespace-nowrap">Poslední ve fleetu</th>
-                    <th className="px-2 py-2 text-left border-b whitespace-nowrap">Poslední chyba</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map(c => (
-                    <tr key={`${c.import_type}:${c.ext_id}`}
-                        className={`border-b hover:bg-gray-50 ${c.inactive ? 'text-gray-400' : ''}`}>
-                      <td className="px-2 py-1.5">
-                        <span className={`inline-block px-2 py-0.5 rounded border text-[11px] font-medium ${CAR_STATUS_BADGE[c.car_status]}`}>
-                          {CAR_STATUS_LABEL[c.car_status]}
-                        </span>
-                      </td>
-                      <td className="px-2 py-1.5 font-mono">{c.spz ?? ''}</td>
-                      <td className="px-2 py-1.5 font-mono text-gray-500">{c.vin ?? ''}</td>
-                      <td className="px-2 py-1.5 font-mono">{c.ext_id}</td>
-                      <td className="px-2 py-1.5">{c.ext_name ?? ''}</td>
-                      <td className="px-2 py-1.5 whitespace-nowrap" title={c.last_imported_rec_time ?? ''}>
-                        {fmtTs(c.last_imported_rec_time)}
-                        {c.last_imported_rec_time && <span className="text-gray-400 ml-1">({relativeAge(c.last_imported_rec_time)})</span>}
-                      </td>
-                      <td className="px-2 py-1.5 whitespace-nowrap" title={c.last_car_import_time ?? ''}>
-                        {fmtTs(c.last_car_import_time)}
-                      </td>
-                      <td className="px-2 py-1.5 max-w-[300px] truncate text-red-700" title={c.last_error ?? ''}>
-                        {c.last_error ?? ''}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {!loading && !error && cars.length > 0 && (
+            <>
+              {visibleActive.length > 0
+                ? <CarsTable list={visibleActive} />
+                : <div className="text-gray-400 py-8 px-3 text-sm">
+                    {onlyProblems ? 'Žádná aktivní auta s problémem.' : 'Žádná aktivní auta.'}
+                  </div>}
+
+              {retiredCars.length > 0 && (
+                <div className="mt-4 border-t pt-3">
+                  <button
+                    onClick={() => setShowRetired(v => !v)}
+                    className="w-full text-left px-3 py-2 text-xs uppercase tracking-wide text-gray-500 hover:bg-gray-50 rounded">
+                    {showRetired ? '▾' : '▸'} Vyřazená / neaktivní auta ({retiredCars.length})
+                    <span className="ml-2 normal-case tracking-normal text-gray-400 text-[11px]">
+                      — import je přeskakuje, můžeš je z importu odstranit
+                    </span>
+                  </button>
+                  {showRetired && <div className="mt-2"><CarsTable list={retiredCars} muted /></div>}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -221,6 +255,11 @@ export const Imports = () => {
     return c
   }, [rows])
 
+  const orphanCount = React.useMemo(
+    () => rows.filter(r => r.orphan_company).length,
+    [rows],
+  )
+
   const visible = React.useMemo(() => {
     const term = q.trim().toLowerCase()
     return rows.filter(r => {
@@ -236,6 +275,10 @@ export const Imports = () => {
       return true
     })
   }, [rows, filter, q])
+
+  const activeRows = React.useMemo(() => visible.filter(r => !r.orphan_company), [visible])
+  const orphanRows = React.useMemo(() => visible.filter(r =>  r.orphan_company), [visible])
+  const [showOrphans, setShowOrphans] = React.useState(false)
 
   const FilterBtn = ({ value, label, count, tone }: {
     value: typeof filter; label: string; count?: number; tone?: string
@@ -256,7 +299,7 @@ export const Imports = () => {
       <div className="max-w-full">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-semibold text-gray-800">Importy</h1>
+            <h1 className="text-2xl font-semibold text-gray-800">Importy GPS</h1>
             <p className="text-sm text-gray-500">Stav napojení na dodavatele GPS/telematiky za všechny firmy.</p>
           </div>
           <button onClick={load}
@@ -289,101 +332,151 @@ export const Imports = () => {
           {!loading && !error && visible.length === 0 && (
             <div className="text-gray-400 py-12 px-4 text-sm text-center">Žádné záznamy.</div>
           )}
-          {!loading && !error && visible.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm border-collapse">
-                <thead>
-                  <tr className="bg-gray-100 text-gray-600 uppercase tracking-wide text-[11px]">
-                    <th className="px-3 py-2 text-left border-b">Stav</th>
-                    <th className="px-3 py-2 text-left border-b">Firma</th>
-                    <th className="px-3 py-2 text-left border-b">Typ importu</th>
-                    <th className="px-3 py-2 text-left border-b">Účet u dodavatele</th>
-                    <th className="px-3 py-2 text-left border-b whitespace-nowrap">Poslední aktivita</th>
-                    <th className="px-3 py-2 text-right border-b whitespace-nowrap">Auta</th>
-                    <th className="px-3 py-2 text-left border-b">Poslední chyba</th>
-                    <th className="px-3 py-2 text-left border-b whitespace-nowrap">Pozastaveno</th>
-                    <th className="px-3 py-2 text-right border-b whitespace-nowrap">Detail</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visible.map(r => {
-                    const isProblem = r.status !== 'ok'
-                    return (
-                      <tr key={`${r.company_key}:${r.import_type}`}
-                          onClick={() => isProblem && setSelected(r)}
-                          className={`border-b transition-colors ${
-                            isProblem ? 'hover:bg-gray-50 cursor-pointer' : ''
-                          }`}>
-                        <td className="px-3 py-2">
-                          <span className={`inline-block px-2 py-0.5 rounded border text-[11px] font-medium ${STATUS_BADGE[r.status]}`}>
-                            {STATUS_LABEL[r.status]}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="font-medium text-gray-800">{r.company_name ?? <span className="text-gray-400">—</span>}</div>
-                          <div className="text-xs text-gray-500 font-mono">
-                            {r.company_id ?? `#${r.company_key}`}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="font-mono font-medium text-teal-700">{r.import_type}</div>
-                          {r.import_name && <div className="text-xs text-gray-500">{r.import_name}</div>}
-                          <div className="text-[10px] text-gray-400 mt-0.5">
-                            {r.no_gps ? 'bez GPS' : `tolerance ${fmtDurationMin(r.silent_min)}`}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-xs">
-                          {r.comp_id && <div className="font-mono">{r.comp_id}</div>}
-                          {r.comp_name && <div className="text-gray-500">{r.comp_name}</div>}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs" title={`servis: ${r.last_import_time ?? '-'} | nejnovější pozice: ${r.newest_rec ?? '-'}`}>
-                          {(() => {
-                            const rec = r.newest_rec ? new Date(r.newest_rec).getTime() : 0
-                            const svc = r.last_import_time ? new Date(r.last_import_time).getTime() : 0
-                            const pick = rec >= svc ? r.newest_rec : r.last_import_time
-                            if (!pick) return <span className="text-gray-400">nikdy</span>
-                            return <>
-                              {fmtTs(pick)}
-                              <div className="text-gray-400">{relativeAge(pick)}</div>
-                            </>
-                          })()}
-                        </td>
-                        <td className="px-3 py-2 text-right text-xs tabular-nums">
-                          {r.total_cars > 0 ? (
-                            <>
-                              <div>{r.total_cars}</div>
-                              {r.cars_with_error > 0 && (
-                                <div className="text-red-600">{r.cars_with_error} s chybou</div>
-                              )}
-                            </>
-                          ) : <span className="text-gray-400">0</span>}
-                        </td>
-                        <td className="px-3 py-2 text-red-700 text-xs max-w-[320px] truncate" title={r.last_error ?? ''}>
-                          {r.last_error ?? ''}
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap text-xs">
-                          {r.suspended_on ? fmtTs(r.suspended_on) : ''}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          {isProblem && (
-                            <button
-                              onClick={e => { e.stopPropagation(); setSelected(r) }}
-                              className="text-teal-600 hover:text-teal-800 text-xs font-medium">
-                              Zobrazit →
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+          {!loading && !error && activeRows.length > 0 && (
+            <ImportsTable rows={activeRows} onOpen={setSelected} />
+          )}
+          {!loading && !error && activeRows.length === 0 && orphanRows.length > 0 && (
+            <div className="text-gray-400 py-8 px-4 text-sm text-center">
+              Žádné aktivní firmy odpovídají filtru. Sirotky viz níže.
             </div>
           )}
         </div>
+
+        {!loading && !error && orphanRows.length > 0 && (
+          <div className="mt-4 bg-white rounded shadow-sm">
+            <button
+              onClick={() => setShowOrphans(v => !v)}
+              className="w-full flex items-center gap-2 px-4 py-3 text-left border-b hover:bg-gray-50">
+              <span className="text-gray-500">{showOrphans ? '▾' : '▸'}</span>
+              <span className="font-medium text-gray-700">
+                Sirotčí importy — firma už neexistuje ({orphanRows.length}{orphanCount !== orphanRows.length && `/${orphanCount}`})
+              </span>
+              <span className="ml-2 text-xs text-gray-400">
+                — company_key není v provider.company; import můžeš zrušit
+              </span>
+            </button>
+            {showOrphans && <ImportsTable rows={orphanRows} onOpen={setSelected} muted />}
+          </div>
+        )}
 
         {selected && <CarsModal row={selected} onClose={() => setSelected(null)} />}
       </div>
     </Layout>
   )
 }
+
+// ── Sdílená tabulka řádků importů ────────────────────────────────────────────
+
+type ImportsTableProps = {
+  rows: ImportServiceRow[]
+  onOpen: (r: ImportServiceRow) => void
+  muted?: boolean
+}
+
+const ImportsTable = ({ rows, onOpen, muted }: ImportsTableProps) => (
+  <div className="overflow-x-auto">
+    <table className="min-w-full text-sm border-collapse">
+      <thead>
+        <tr className="bg-gray-100 text-gray-600 uppercase tracking-wide text-[11px]">
+          <th className="px-3 py-2 text-left border-b">Stav</th>
+          <th className="px-3 py-2 text-left border-b">Firma</th>
+          <th className="px-3 py-2 text-left border-b">Typ importu</th>
+          <th className="px-3 py-2 text-left border-b">Účet u dodavatele</th>
+          <th className="px-3 py-2 text-left border-b whitespace-nowrap">Poslední aktivita</th>
+          <th className="px-3 py-2 text-right border-b whitespace-nowrap">Auta</th>
+          <th className="px-3 py-2 text-left border-b">Poslední chyba</th>
+          <th className="px-3 py-2 text-left border-b whitespace-nowrap">Pozastaveno</th>
+          <th className="px-3 py-2 text-right border-b whitespace-nowrap">Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(r => {
+          const isProblem = r.status !== 'ok'
+          return (
+            <tr key={`${r.company_key}:${r.import_type}`}
+                onClick={() => isProblem && onOpen(r)}
+                className={`border-b transition-colors ${
+                  isProblem ? 'hover:bg-gray-50 cursor-pointer' : ''
+                } ${muted ? 'text-gray-500' : ''}`}>
+              <td className="px-3 py-2">
+                <span className={`inline-block px-2 py-0.5 rounded border text-[11px] font-medium ${STATUS_BADGE[r.status]}`}>
+                  {STATUS_LABEL[r.status]}
+                </span>
+              </td>
+              <td className="px-3 py-2">
+                {r.company_name
+                  ? <Link
+                      to={`/company/${r.company_key}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="font-medium text-gray-800 hover:text-teal-700 hover:underline">
+                      {r.company_name}
+                    </Link>
+                  : <span className="font-medium text-gray-400">— firma neexistuje —</span>}
+                <div className="text-xs text-gray-500 font-mono">
+                  {r.company_id ?? `#${r.company_key}`}
+                </div>
+              </td>
+              <td className="px-3 py-2">
+                <div className="font-mono font-medium text-teal-700">{r.import_type}</div>
+                {r.import_name && <div className="text-xs text-gray-500">{r.import_name}</div>}
+                <div className="text-[10px] text-gray-400 mt-0.5">
+                  {r.no_gps ? 'bez GPS' : `tolerance ${fmtDurationMin(r.silent_min)}`}
+                </div>
+              </td>
+              <td className="px-3 py-2 text-xs">
+                {r.comp_id && <div className="font-mono">{r.comp_id}</div>}
+                {r.comp_name && <div className="text-gray-500">{r.comp_name}</div>}
+              </td>
+              <td className="px-3 py-2 whitespace-nowrap text-xs" title={`servis: ${r.last_import_time ?? '-'} | nejnovější pozice: ${r.newest_rec ?? '-'}`}>
+                {(() => {
+                  const rec = r.newest_rec ? new Date(r.newest_rec).getTime() : 0
+                  const svc = r.last_import_time ? new Date(r.last_import_time).getTime() : 0
+                  const pick = rec >= svc ? r.newest_rec : r.last_import_time
+                  if (!pick) return <span className="text-gray-400">nikdy</span>
+                  return <>
+                    {fmtTs(pick)}
+                    <div className="text-gray-400">{relativeAge(pick)}</div>
+                  </>
+                })()}
+              </td>
+              <td className="px-3 py-2 text-right text-xs tabular-nums">
+                {r.total_cars > 0 ? (
+                  <>
+                    <div>{r.active_cars}<span className="text-gray-400">{r.active_cars !== r.total_cars && ` z ${r.total_cars}`}</span></div>
+                    {r.cars_with_error > 0 && (
+                      <div className="text-red-600">{r.cars_with_error} s chybou</div>
+                    )}
+                    {(r.inactive_cars > 0 || r.retired_cars > 0) && (
+                      <div className="text-gray-400">
+                        {r.inactive_cars > 0 && `${r.inactive_cars} neaktiv.`}
+                        {r.inactive_cars > 0 && r.retired_cars > 0 && ' · '}
+                        {r.retired_cars > 0 && `${r.retired_cars} vyřaz.`}
+                      </div>
+                    )}
+                  </>
+                ) : <span className="text-gray-400">0</span>}
+              </td>
+              <td className="px-3 py-2 text-red-700 text-xs max-w-[320px] truncate" title={r.last_error ?? ''}>
+                {r.last_error ?? ''}
+              </td>
+              <td className="px-3 py-2 whitespace-nowrap text-xs">
+                {r.suspended_on ? fmtTs(r.suspended_on) : ''}
+              </td>
+              <td className="px-3 py-2 text-right">
+                {isProblem && (
+                  <button
+                    onClick={e => { e.stopPropagation(); onOpen(r) }}
+                    className="text-teal-600 hover:text-teal-800 text-xs font-medium">
+                    Zobrazit →
+                  </button>
+                )}
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
+  </div>
+)
