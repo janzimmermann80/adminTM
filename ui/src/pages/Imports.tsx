@@ -70,6 +70,65 @@ const CAR_STATUS_LABEL: Record<ImportCarStatus, string> = {
 
 const isCarRetiredOrInactive = (s: ImportCarStatus) => s === 'inactive' || s === 'retired'
 
+// ── Legendy stavů ────────────────────────────────────────────────────────────
+
+type LegendEntry = { key: string; label: string; badge: string; desc: string }
+
+const SERVICE_STATUS_LEGEND: LegendEntry[] = [
+  { key: 'ok',        label: STATUS_LABEL.ok,        badge: STATUS_BADGE.ok,
+    desc: 'Servisní tik i poslední pozice v toleranci (viz „tolerance“ u typu importu).' },
+  { key: 'error',     label: STATUS_LABEL.error,     badge: STATUS_BADGE.error,
+    desc: 'Poslední pokus o import skončil chybou (viz sloupec Poslední chyba).' },
+  { key: 'stale',     label: STATUS_LABEL.stale,     badge: STATUS_BADGE.stale,
+    desc: 'Žádná nová pozice ani servisní tik po dobu delší než tolerance daného typu.' },
+  { key: 'suspended', label: STATUS_LABEL.suspended, badge: STATUS_BADGE.suspended,
+    desc: 'Import je administrativně pozastavený (suspended_on není null).' },
+]
+
+const CAR_STATUS_LEGEND: LegendEntry[] = [
+  { key: 'ok',                label: CAR_STATUS_LABEL.ok,                badge: CAR_STATUS_BADGE.ok,
+    desc: 'Poslední pozice v toleranci a auto je aktivní v systému.' },
+  { key: 'error',             label: CAR_STATUS_LABEL.error,             badge: CAR_STATUS_BADGE.error,
+    desc: 'U tohoto auta se poslední import nezdařil.' },
+  { key: 'silent',            label: CAR_STATUS_LABEL.silent,            badge: CAR_STATUS_BADGE.silent,
+    desc: 'Auto je stále ve fleetu dodavatele, ale nepřišla žádná nová pozice v rámci tolerance.' },
+  { key: 'gone-from-vendor',  label: CAR_STATUS_LABEL['gone-from-vendor'], badge: CAR_STATUS_BADGE['gone-from-vendor'],
+    desc: 'Auto zmizelo z fleetu u dodavatele (odpojený vůz / smazané u dodavatele).' },
+  { key: 'inactive',          label: CAR_STATUS_LABEL.inactive,          badge: CAR_STATUS_BADGE.inactive,
+    desc: 'Auto je v naší databázi označené jako neaktivní (inactive=true) — import ho ignoruje.' },
+  { key: 'retired',           label: CAR_STATUS_LABEL.retired,           badge: CAR_STATUS_BADGE.retired,
+    desc: 'Auto bylo dříve spárováno, ale řádek car_base v naší DB už neexistuje (auto smazáno).' },
+]
+
+const Legend = ({ entries, title }: { entries: LegendEntry[]; title: string }) => {
+  const [open, setOpen] = React.useState(false)
+  return (
+    <div className="mb-3 bg-white border border-gray-200 rounded">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50">
+        <span className="text-gray-500">{open ? '▾' : '▸'}</span>
+        <span className="text-gray-700 font-medium">Vysvětlivky — {title}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3 pt-1 grid gap-2 sm:grid-cols-2">
+          {entries.map(e => (
+            <div key={e.key} className="flex items-start gap-2 text-xs">
+              <span className={`inline-block px-2 py-0.5 rounded border text-[11px] font-medium whitespace-nowrap ${e.badge}`}>
+                {e.label}
+              </span>
+              <span className="text-gray-600 leading-snug">{e.desc}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+const ServiceStatusLegend = () => <Legend entries={SERVICE_STATUS_LEGEND} title="stavy importních služeb" />
+const CarStatusLegend     = () => <Legend entries={CAR_STATUS_LEGEND}     title="stavy jednotlivých aut" />
+
 // ── Ikony ────────────────────────────────────────────────────────────────────
 
 const IconRefresh = () => (
@@ -110,11 +169,16 @@ const CarsModal = ({ row, onClose }: CarsModalProps) => {
 
   const activeCars  = cars.filter(c => !isCarRetiredOrInactive(c.car_status))
   const retiredCars = cars.filter(c =>  isCarRetiredOrInactive(c.car_status))
-  const [showRetired, setShowRetired] = React.useState(false)
 
   const visibleActive = onlyProblems
     ? activeCars.filter(c => c.car_status !== 'ok')
     : activeCars
+
+  // Když v aktivních není žádný problém, ale existují vyřazená/neaktivní — otevři je automaticky.
+  const [showRetired, setShowRetired] = React.useState(false)
+  React.useEffect(() => {
+    if (!loading && visibleActive.length === 0 && retiredCars.length > 0) setShowRetired(true)
+  }, [loading, visibleActive.length, retiredCars.length])
 
   const CarsTable = ({ list, muted }: { list: ImportCarRow[]; muted?: boolean }) => (
     <div className="overflow-x-auto">
@@ -192,6 +256,8 @@ const CarsModal = ({ row, onClose }: CarsModalProps) => {
             {retiredCars.length > 0 && <span className="ml-3">Vyřazená/neaktivní: {retiredCars.length}</span>}
           </div>
         </div>
+
+        <div className="px-5 pt-3"><CarStatusLegend /></div>
 
         <div className="p-2">
           {loading && <div className="flex justify-center py-12"><Spinner size={8} /></div>}
@@ -326,6 +392,8 @@ export const Imports = () => {
           </div>
         </div>
 
+        <ServiceStatusLegend />
+
         <div className="bg-white rounded shadow-sm">
           {loading && <div className="flex justify-center py-16"><Spinner size={10} /></div>}
           {error && <div className="text-red-600 py-8 px-4">{error}</div>}
@@ -394,10 +462,10 @@ const ImportsTable = ({ rows, onOpen, muted }: ImportsTableProps) => (
           const isProblem = r.status !== 'ok'
           return (
             <tr key={`${r.company_key}:${r.import_type}`}
-                onClick={() => isProblem && onOpen(r)}
-                className={`border-b transition-colors ${
-                  isProblem ? 'hover:bg-gray-50 cursor-pointer' : ''
-                } ${muted ? 'text-gray-500' : ''}`}>
+                onClick={() => onOpen(r)}
+                className={`border-b transition-colors hover:bg-gray-50 cursor-pointer ${
+                  muted ? 'text-gray-500' : ''
+                }`}>
               <td className="px-3 py-2">
                 <span className={`inline-block px-2 py-0.5 rounded border text-[11px] font-medium ${STATUS_BADGE[r.status]}`}>
                   {STATUS_LABEL[r.status]}
@@ -465,13 +533,13 @@ const ImportsTable = ({ rows, onOpen, muted }: ImportsTableProps) => (
                 {r.suspended_on ? fmtTs(r.suspended_on) : ''}
               </td>
               <td className="px-3 py-2 text-right">
-                {isProblem && (
-                  <button
-                    onClick={e => { e.stopPropagation(); onOpen(r) }}
-                    className="text-teal-600 hover:text-teal-800 text-xs font-medium">
-                    Zobrazit →
-                  </button>
-                )}
+                <button
+                  onClick={e => { e.stopPropagation(); onOpen(r) }}
+                  className={`text-xs font-medium ${
+                    isProblem ? 'text-teal-600 hover:text-teal-800' : 'text-gray-400 hover:text-teal-700'
+                  }`}>
+                  Zobrazit →
+                </button>
               </td>
             </tr>
           )
