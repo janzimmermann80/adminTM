@@ -827,11 +827,23 @@ export async function companiesRoutes(app: FastifyInstance) {
           WHERE company_key = ${id} AND username = ${username_old}
         `
       } else {
-        await sql`
-          INSERT INTO ${sql(employeeSchema + '.user_account')} (company_key, username, password, person_key)
-          VALUES (${id}, ${username}, ${password}, ${person_key ?? null})
-          ON CONFLICT (company_key, username) DO UPDATE SET password = ${password}
+        // INSERT (bez ON CONFLICT — user_account nemá unique constraint na (company_key, username))
+        const existing = await sql`
+          SELECT 1 FROM ONLY ${sql(employeeSchema + '.user_account')}
+          WHERE company_key = ${id} AND username = ${username} LIMIT 1
         `
+        if (existing.length > 0) {
+          await sql`
+            UPDATE ONLY ${sql(employeeSchema + '.user_account')}
+            SET password = ${password}, person_key = ${person_key !== undefined ? person_key : sql`person_key`}
+            WHERE company_key = ${id} AND username = ${username}
+          `
+        } else {
+          await sql`
+            INSERT INTO ${sql(employeeSchema + '.user_account')} (company_key, username, password, person_key)
+            VALUES (${id}, ${username}, ${password}, ${person_key ?? null})
+          `
+        }
       }
       return reply.send({ ok: true })
     } finally {

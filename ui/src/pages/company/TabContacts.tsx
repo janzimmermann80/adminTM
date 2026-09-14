@@ -32,6 +32,9 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
   const [showAddPerson, setShowAddPerson] = useState(false)
   const [newPerson, setNewPerson] = useState({ name: '', sex: 'M', send_offers: false })
 
+  const [showAddAdmin, setShowAddAdmin] = useState(false)
+  const [newAdmin, setNewAdmin] = useState({ username: '', password: '' })
+
   const [editKey, setEditKey] = useState<number | null>(null)
   const [editAdminKey, setEditAdminKey] = useState<string | null>(null)
   const [editData, setEditData] = useState<RowEdit | null>(null)
@@ -124,6 +127,19 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
       await addPerson(companyKey, newPerson)
       setShowAddPerson(false)
       setNewPerson({ name: '', sex: 'M', send_offers: false })
+      await load()
+    } catch (e: any) { setError(e.message) }
+    finally { setSaving(false) }
+  }
+
+  // Nový admin (firemní) účet — person_key NULL (bez kontaktu, importance 0)
+  const handleAddAdmin = async () => {
+    if (!newAdmin.username.trim()) return
+    setSaving(true)
+    try {
+      await upsertUserAccount(companyKey, { username: newAdmin.username.trim(), password: newAdmin.password, person_key: null })
+      setShowAddAdmin(false)
+      setNewAdmin({ username: '', password: '' })
       await load()
     } catch (e: any) { setError(e.message) }
     finally { setSaving(false) }
@@ -385,6 +401,81 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
               const pContacts = contactsForPerson(person)
               const mobiles = pContacts.filter(c => c.type === 'G')
               const emails = pContacts.filter(c => c.type === 'E')
+              const isEditing = editKey === person.person_key
+
+              if (isEditing && editData) {
+                return (
+                  <tr key={`noacc-${person.person_key}`} className="bg-teal-50/40">
+                    {/* Jméno edit */}
+                    <td className="px-3 py-2">
+                      <div className="flex gap-1">
+                        <input className={inputCls} value={editData.name}
+                          onChange={e => setEditData(p => p && ({ ...p, name: e.target.value }))} />
+                        <select className="border border-gray-300 rounded-lg px-1 py-1 text-sm outline-none focus:ring-2 focus:ring-teal-500"
+                          value={editData.sex} onChange={e => setEditData(p => p && ({ ...p, sex: e.target.value }))}>
+                          <option value="M">M</option>
+                          <option value="F">F</option>
+                        </select>
+                      </div>
+                    </td>
+                    {/* Mobil edit */}
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-1">
+                        {editData.mobiles.map((m, i) => (
+                          <input key={m.contact_key} className={inputCls} value={m.value}
+                            onChange={e => setEditData(p => p && ({ ...p, mobiles: p.mobiles.map((x, j) => j === i ? { ...x, value: e.target.value } : x) }))} />
+                        ))}
+                        {editData.mobiles.length === 0 && (
+                          <input className={inputCls} value={editData.newMobile} placeholder="+ přidat"
+                            onChange={e => setEditData(p => p && ({ ...p, newMobile: e.target.value }))} />
+                        )}
+                      </div>
+                    </td>
+                    {/* Email edit */}
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-1">
+                        {editData.emails.map((m, i) => (
+                          <input key={m.contact_key} className={inputCls} value={m.value}
+                            onChange={e => setEditData(p => p && ({ ...p, emails: p.emails.map((x, j) => j === i ? { ...x, value: e.target.value } : x) }))} />
+                        ))}
+                        {editData.emails.length === 0 && (
+                          <input className={inputCls} value={editData.newEmail} placeholder="+ přidat"
+                            onChange={e => setEditData(p => p && ({ ...p, newEmail: e.target.value }))} />
+                        )}
+                      </div>
+                    </td>
+                    {/* Username edit — vytvoří nový účet osobě */}
+                    <td className="px-3 py-2">
+                      <input className={inputCls + ' font-mono'} value={editData.username} placeholder="uživatel"
+                        onChange={e => setEditData(p => p && ({ ...p, username: e.target.value }))} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input className={inputCls + ' font-mono'} value={editData.password} placeholder="heslo"
+                        onChange={e => setEditData(p => p && ({ ...p, password: e.target.value }))} />
+                    </td>
+                    {/* Akce */}
+                    <td className="px-3 py-2">
+                      <div className="flex flex-col gap-1">
+                        <button onClick={() => handleSave(person)} disabled={saving}
+                          className="flex items-center justify-center bg-teal-600 text-white rounded-lg px-2 py-1 hover:bg-teal-700 disabled:opacity-50">
+                          {saving ? <Spinner size={3} /> : (
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
+                        <button onClick={() => { setEditKey(null); setEditAdminKey(null); setEditData(null) }}
+                          className="flex items-center justify-center border border-gray-300 rounded-lg px-2 py-1 hover:bg-gray-100">
+                          <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              }
+
               return (
                 <tr key={`noacc-${person.person_key}`} className="hover:bg-gray-50 cursor-pointer group"
                   onClick={() => startEdit(person, pContacts, undefined)}>
@@ -593,15 +684,45 @@ export const TabContacts = ({ companyKey, companyId }: Props) => {
             </div>
           </div>
         ) : (
-          <div className="border-t border-gray-100">
+          <div className="border-t border-gray-100 flex">
             <button onClick={() => setShowAddPerson(true)}
-              className="w-full px-4 py-2.5 text-sm text-teal-600 hover:bg-teal-50 flex items-center justify-center gap-1.5 transition-colors">
+              className="flex-1 px-4 py-2.5 text-sm text-teal-600 hover:bg-teal-50 flex items-center justify-center gap-1.5 transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                   d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
               </svg>
               Přidat kontaktní osobu
             </button>
+            <button onClick={() => setShowAddAdmin(true)}
+              className="flex-1 px-4 py-2.5 text-sm text-indigo-600 hover:bg-indigo-50 flex items-center justify-center gap-1.5 transition-colors border-l border-gray-100">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+              </svg>
+              Přidat admin účet
+            </button>
+          </div>
+        )}
+
+        {/* Formulář pro nový admin účet (person_key NULL, importance 0) */}
+        {showAddAdmin && (
+          <div className="border-t border-indigo-200 bg-indigo-50 px-4 py-3">
+            <div className="flex items-center gap-3 flex-wrap">
+              <input className="border border-gray-300 rounded-lg px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                value={newAdmin.username} placeholder="Uživatel" autoFocus
+                onKeyDown={e => e.key === 'Enter' && handleAddAdmin()}
+                onChange={e => setNewAdmin(p => ({ ...p, username: e.target.value }))} />
+              <input className="border border-gray-300 rounded-lg px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-indigo-500 font-mono"
+                value={newAdmin.password} placeholder="Heslo"
+                onKeyDown={e => e.key === 'Enter' && handleAddAdmin()}
+                onChange={e => setNewAdmin(p => ({ ...p, password: e.target.value }))} />
+              <button onClick={handleAddAdmin} disabled={saving || !newAdmin.username.trim()}
+                className="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-60">
+                {saving ? <Spinner size={4} /> : 'Přidat'}
+              </button>
+              <button onClick={() => setShowAddAdmin(false)}
+                className="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50">Zrušit</button>
+            </div>
           </div>
         )}
       </div>
