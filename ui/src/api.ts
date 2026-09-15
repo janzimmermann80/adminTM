@@ -418,6 +418,8 @@ export type ApiRequestsByCompanyRow = {
   maps_javascript_czk: number
   openai_pdf: number
   openai_pdf_czk: number
+  openai_asistent: number
+  openai_asistent_czk: number
   place_details: number
   place_details_czk: number
   tollguru_route_cost: number

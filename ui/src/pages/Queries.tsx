@@ -617,6 +617,7 @@ const ARBC_COLS: { key: keyof ApiRequestsByCompanyRow; czk: keyof ApiRequestsByC
   { key: 'maps_javascript',     czk: 'maps_javascript_czk',     label: 'maps-javascript' },
   { key: 'geocoding',           czk: 'geocoding_czk',           label: 'geocoding' },
   { key: 'openai_pdf',          czk: 'openai_pdf_czk',          label: 'openai-pdf' },
+  { key: 'openai_asistent',     czk: 'openai_asistent_czk',     label: 'AI asistent' },
   { key: 'here_route_cost',     czk: 'here_route_cost_czk',     label: 'here-route-cost' },
   { key: 'tollguru_route_cost', czk: 'tollguru_route_cost_czk', label: 'tollguru-route-cost' },
 ]
