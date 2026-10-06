@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import ExcelJS from 'exceljs'
 import { getUserSql } from '../db/userSql.js'
 
 interface SearchQuery {
@@ -55,6 +56,113 @@ const SPECIAL_TARIFF_GROUPS: Record<string, string> = {
   truckmanager: `C.tariff IN ('12','13','14','15','21','22','23','24','25','26')`,
 }
 
+// Sestaví WHERE podmínky + parametry pro vyhledávání firem (sdíleno mezi
+// GET /api/search a GET /api/search/export). Vrací i čítač dalšího $ parametru.
+function buildSearchWhere(q: SearchQuery): { whereSQL: string; params: unknown[]; nextParam: number } {
+  const matchPrefix = q.match === 'begins' ? '' : '%'
+
+  const whereClauses: string[] = []
+  const params: unknown[] = []
+  let p = 1
+
+  const addParam = (val: unknown) => { params.push(val); return `$${p++}` }
+
+  // --- text search ---
+  if (q.q && q.field) {
+    const term = `${matchPrefix}${q.q}%`
+    switch (q.field) {
+      case 'id':      whereClauses.push(`C.id ILIKE ${addParam(term)}`); break
+      case 'company': whereClauses.push(`C.company ILIKE ${addParam(term)}`); break
+      case 'cin':     whereClauses.push(`C.cin ILIKE ${addParam(term)}`); break
+      case 'street':  whereClauses.push(`C.street ILIKE ${addParam(term)}`); break
+      case 'zip':     whereClauses.push(`C.zip ILIKE ${addParam(term)}`); break
+      case 'city':    whereClauses.push(`C.city ILIKE ${addParam(term)}`); break
+      case 'phone':
+        whereClauses.push(`C.company_key IN (SELECT company_key FROM provider.contact WHERE type IN ('T','G') AND value ILIKE ${addParam(term)})`)
+        break
+      case 'email':
+        whereClauses.push(`C.company_key IN (SELECT company_key FROM provider.contact WHERE type='E' AND value ILIKE ${addParam(term)})`)
+        break
+      case 'name':
+        whereClauses.push(`C.company_key IN (SELECT company_key FROM provider.contact_person WHERE name ILIKE ${addParam(term)})`)
+        break
+      case 'username':
+        whereClauses.push(`C.company_key IN (SELECT company_key FROM provider.user_account WHERE username ILIKE ${addParam(term)})`)
+        break
+    }
+  }
+
+  // --- tariff filter ---
+  if (q.tariff && q.tariff !== 'all') {
+    if (SPECIAL_TARIFF_GROUPS[q.tariff]) {
+      whereClauses.push(SPECIAL_TARIFF_GROUPS[q.tariff])
+    } else {
+      whereClauses.push(`C.tariff = ${addParam(q.tariff)}`)
+    }
+  }
+
+  // --- simple filters ---
+  if (q.branch && q.branch !== 'all') whereClauses.push(`C.branch = ${addParam(q.branch)}`)
+  if (q.country) whereClauses.push(`C.country = ${addParam(q.country)}`)
+  if (q.region)  whereClauses.push(`C.region = ${addParam(q.region)}`)
+  if (q.zip)     whereClauses.push(`C.zip ILIKE ${addParam(q.zip + '%')}`)
+
+  // --- vehicle / SIM filters (SearchB) ---
+  if (q.car_key) whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.car_base WHERE car_key = ${addParam(Number(q.car_key))})`)
+  if (q.spz)     whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.car_base WHERE spz ILIKE ${addParam('%' + q.spz + '%')})`)
+  if (q.imsi)    whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.simcard_base WHERE imsi ILIKE ${addParam(q.imsi + '%')})`)
+  if (q.tm_tel)  whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.simcard_base WHERE number ILIKE ${addParam('%' + q.tm_tel + '%')})`)
+
+  // --- company_detail date filters ---
+  const detailClauses: string[] = []
+
+  if (q.contract_date_null === 'true') {
+    detailClauses.push('contract_date IS NULL')
+  } else {
+    if (q.contract_date_from) detailClauses.push(`contract_date >= ${addParam(q.contract_date_from)}`)
+    if (q.contract_date_to)   detailClauses.push(`contract_date <= ${addParam(q.contract_date_to)}`)
+  }
+
+  const validOps = ['>=', '<=', '=']
+  if (q.prog_lent_date) {
+    const op = validOps.includes(q.prog_lent_date_op ?? '') ? q.prog_lent_date_op : '>='
+    detailClauses.push(`prog_lent_date ${op} ${addParam(q.prog_lent_date)}`)
+  }
+  if (q.prog_sent_date) {
+    const op = validOps.includes(q.prog_sent_date_op ?? '') ? q.prog_sent_date_op : '>='
+    detailClauses.push(`prog_sent_date ${op} ${addParam(q.prog_sent_date)}`)
+  }
+  if (q.admittance_date) {
+    const op = validOps.includes(q.admittance_date_op ?? '') ? q.admittance_date_op : '>='
+    detailClauses.push(`admittance_date ${op} ${addParam(q.admittance_date)}`)
+  }
+
+  if (detailClauses.length > 0) {
+    whereClauses.push(
+      `C.company_key IN (SELECT company_key FROM provider.company_detail WHERE ${detailClauses.join(' AND ')})`
+    )
+  }
+
+  // --- note filters ---
+  const noteClauses: string[] = []
+  if (q.note_from) noteClauses.push(`creation_date >= ${addParam(q.note_from)}`)
+  if (q.note_to)   noteClauses.push(`creation_date <= ${addParam(q.note_to)}`)
+  if (q.note_type)    noteClauses.push(`type = ${addParam(q.note_type)}`)
+  if (q.note_creator) noteClauses.push(`creator = ${addParam(q.note_creator)}`)
+
+  if (noteClauses.length > 0) {
+    whereClauses.push(
+      `C.company_key IN (SELECT company_key FROM provider.note WHERE ${noteClauses.join(' AND ')})`
+    )
+  }
+
+  return {
+    whereSQL: whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '',
+    params,
+    nextParam: p,
+  }
+}
+
 export async function searchRoutes(app: FastifyInstance) {
 
   // GET /api/search/meta - tariffs + branches for filter dropdowns
@@ -85,104 +193,8 @@ export async function searchRoutes(app: FastifyInstance) {
     const offset = Number(q.offset ?? 0)
     const validOrders = ['id', 'company', 'street', 'zip', 'city', 'country', 'region', 'tariff', 'last_modif']
     const order = validOrders.includes(q.order ?? '') ? q.order as string : 'company'
-    const matchPrefix = q.match === 'begins' ? '' : '%'
-
-    const whereClauses: string[] = []
-    const params: unknown[] = []
-    let p = 1
-
-    const addParam = (val: unknown) => { params.push(val); return `$${p++}` }
-
-    // --- text search ---
-    if (q.q && q.field) {
-      const term = `${matchPrefix}${q.q}%`
-      switch (q.field) {
-        case 'id':      whereClauses.push(`C.id ILIKE ${addParam(term)}`); break
-        case 'company': whereClauses.push(`C.company ILIKE ${addParam(term)}`); break
-        case 'cin':     whereClauses.push(`C.cin ILIKE ${addParam(term)}`); break
-        case 'street':  whereClauses.push(`C.street ILIKE ${addParam(term)}`); break
-        case 'zip':     whereClauses.push(`C.zip ILIKE ${addParam(term)}`); break
-        case 'city':    whereClauses.push(`C.city ILIKE ${addParam(term)}`); break
-        case 'phone':
-          whereClauses.push(`C.company_key IN (SELECT company_key FROM provider.contact WHERE type IN ('T','G') AND value ILIKE ${addParam(term)})`)
-          break
-        case 'email':
-          whereClauses.push(`C.company_key IN (SELECT company_key FROM provider.contact WHERE type='E' AND value ILIKE ${addParam(term)})`)
-          break
-        case 'name':
-          whereClauses.push(`C.company_key IN (SELECT company_key FROM provider.contact_person WHERE name ILIKE ${addParam(term)})`)
-          break
-        case 'username':
-          whereClauses.push(`C.company_key IN (SELECT company_key FROM provider.user_account WHERE username ILIKE ${addParam(term)})`)
-          break
-      }
-    }
-
-    // --- tariff filter ---
-    if (q.tariff && q.tariff !== 'all') {
-      if (SPECIAL_TARIFF_GROUPS[q.tariff]) {
-        whereClauses.push(SPECIAL_TARIFF_GROUPS[q.tariff])
-      } else {
-        whereClauses.push(`C.tariff = ${addParam(q.tariff)}`)
-      }
-    }
-
-    // --- simple filters ---
-    if (q.branch && q.branch !== 'all') whereClauses.push(`C.branch = ${addParam(q.branch)}`)
-    if (q.country) whereClauses.push(`C.country = ${addParam(q.country)}`)
-    if (q.region)  whereClauses.push(`C.region = ${addParam(q.region)}`)
-    if (q.zip)     whereClauses.push(`C.zip ILIKE ${addParam(q.zip + '%')}`)
-
-    // --- vehicle / SIM filters (SearchB) ---
-    if (q.car_key) whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.car_base WHERE car_key = ${addParam(Number(q.car_key))})`)
-    if (q.spz)     whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.car_base WHERE spz ILIKE ${addParam('%' + q.spz + '%')})`)
-    if (q.imsi)    whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.simcard_base WHERE imsi ILIKE ${addParam(q.imsi + '%')})`)
-    if (q.tm_tel)  whereClauses.push(`C.company_key IN (SELECT company_key FROM gps.simcard_base WHERE number ILIKE ${addParam('%' + q.tm_tel + '%')})`)
-
-    // --- company_detail date filters ---
-    const detailClauses: string[] = []
-
-    if (q.contract_date_null === 'true') {
-      detailClauses.push('contract_date IS NULL')
-    } else {
-      if (q.contract_date_from) detailClauses.push(`contract_date >= ${addParam(q.contract_date_from)}`)
-      if (q.contract_date_to)   detailClauses.push(`contract_date <= ${addParam(q.contract_date_to)}`)
-    }
-
-    const validOps = ['>=', '<=', '=']
-    if (q.prog_lent_date) {
-      const op = validOps.includes(q.prog_lent_date_op ?? '') ? q.prog_lent_date_op : '>='
-      detailClauses.push(`prog_lent_date ${op} ${addParam(q.prog_lent_date)}`)
-    }
-    if (q.prog_sent_date) {
-      const op = validOps.includes(q.prog_sent_date_op ?? '') ? q.prog_sent_date_op : '>='
-      detailClauses.push(`prog_sent_date ${op} ${addParam(q.prog_sent_date)}`)
-    }
-    if (q.admittance_date) {
-      const op = validOps.includes(q.admittance_date_op ?? '') ? q.admittance_date_op : '>='
-      detailClauses.push(`admittance_date ${op} ${addParam(q.admittance_date)}`)
-    }
-
-    if (detailClauses.length > 0) {
-      whereClauses.push(
-        `C.company_key IN (SELECT company_key FROM provider.company_detail WHERE ${detailClauses.join(' AND ')})`
-      )
-    }
-
-    // --- note filters ---
-    const noteClauses: string[] = []
-    if (q.note_from) noteClauses.push(`creation_date >= ${addParam(q.note_from)}`)
-    if (q.note_to)   noteClauses.push(`creation_date <= ${addParam(q.note_to)}`)
-    if (q.note_type)    noteClauses.push(`type = ${addParam(q.note_type)}`)
-    if (q.note_creator) noteClauses.push(`creator = ${addParam(q.note_creator)}`)
-
-    if (noteClauses.length > 0) {
-      whereClauses.push(
-        `C.company_key IN (SELECT company_key FROM provider.note WHERE ${noteClauses.join(' AND ')})`
-      )
-    }
-
-    const whereSQL = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : ''
+    const { whereSQL, params, nextParam } = buildSearchWhere(q)
+    let p = nextParam
 
     const countQuery = `
       SELECT count(*)::int AS count
@@ -220,22 +232,19 @@ export async function searchRoutes(app: FastifyInstance) {
     }
   })
 
-  // POST /api/search/export — export označených firem do CSV
-  app.post('/export', {
+  // GET /api/search/export — export všech firem odpovídajících filtru do XLSX
+  // Přijímá stejné query parametry jako GET /api/search (bez limit/offset/order).
+  app.get('/export', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { userDb, passwordDb } = (request as any).user
     const sql = getUserSql(userDb, passwordDb)
-    const { keys } = request.body as { keys: number[] }
-
-    if (!Array.isArray(keys) || keys.length === 0) {
-      await sql.end()
-      return reply.code(400).send({ error: 'Žádné záznamy k exportu' })
-    }
+    const q = request.query as SearchQuery
+    const { whereSQL, params } = buildSearchWhere(q)
 
     try {
-    // Základní data firem
-    const companies = await sql`
+    // Základní data firem (všechny odpovídající filtru, bez stránkování)
+    const companies = await sql.unsafe(`
       SELECT C.company_key, C.id, C.tariff, C.region, C.company,
              C.street, C.city, C.zip, C.country, C.cin, C.tin,
              T.name AS tariff_name,
@@ -243,9 +252,18 @@ export async function searchRoutes(app: FastifyInstance) {
       FROM provider.company AS C
       LEFT JOIN provider.tariff AS T ON C.tariff = T.tariff
       LEFT JOIN provider.company_detail AS CD ON C.company_key = CD.company_key
-      WHERE C.company_key = ANY(${keys})
+      ${whereSQL}
       ORDER BY C.company
-    `
+    `, params as any[])
+
+    if (companies.length === 0) {
+      return reply.code(400).send({ error: 'Žádné záznamy k exportu' })
+    }
+    if (companies.length > 10000) {
+      return reply.code(400).send({ error: `Příliš mnoho záznamů k exportu (${companies.length}). Zužte filtr (maximum je 10 000).` })
+    }
+
+    const keys = companies.map(c => Number(c.company_key))
 
     // Kontakty pro všechny firmy najednou
     const contacts = await sql`
@@ -264,7 +282,7 @@ export async function searchRoutes(app: FastifyInstance) {
       ORDER BY importance
     `
 
-    // Sestavení CSV
+    // Sestavení XLSX
     const contactMap = new Map<number, Record<string, string>>()
     for (const c of contacts) {
       const key = Number(c.company_key)
@@ -284,36 +302,63 @@ export async function searchRoutes(app: FastifyInstance) {
       personMap.get(key)!.push(p.name)
     }
 
-    const escape = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    const DATE_FMT = 'dd.mm.yyyy'
 
-    const headers = [
-      'ID','Tarif','Název','Ulice','Město','PSČ','Stát','IČO','DIČ','Oblast',
-      'Datum smlouvy','Datum odeslání','Datum zapůjčení','Datum přístupu',
-      'Telefon 1','GSM 1','E-mail 1','Fax','Kontaktní osoby',
+    const workbook = new ExcelJS.Workbook()
+    const sheet = workbook.addWorksheet('Export')
+
+    sheet.columns = [
+      { header: 'ID',               width: 10 },
+      { header: 'Tarif',            width: 22 },
+      { header: 'Název',            width: 36 },
+      { header: 'Ulice',            width: 26 },
+      { header: 'Město',            width: 20 },
+      { header: 'PSČ',              width: 9 },
+      { header: 'Stát',             width: 6 },
+      { header: 'IČO',              width: 12 },
+      { header: 'DIČ',              width: 14 },
+      { header: 'Oblast',           width: 8 },
+      { header: 'Datum smlouvy',    width: 15 },
+      { header: 'Datum odeslání',   width: 15 },
+      { header: 'Datum zapůjčení',  width: 16 },
+      { header: 'Datum přístupu',   width: 15 },
+      { header: 'Telefon 1',        width: 16 },
+      { header: 'GSM 1',            width: 16 },
+      { header: 'E-mail 1',         width: 28 },
+      { header: 'Fax',              width: 16 },
+      { header: 'Kontaktní osoby',  width: 30 },
     ]
 
-    const rows = companies.map((c) => {
+    sheet.getRow(1).font = { bold: true }
+
+    const DATE_COLS = [11, 12, 13, 14]
+
+    for (const c of companies) {
       const ct = contactMap.get(Number(c.company_key)) ?? {}
       const ps = personMap.get(Number(c.company_key)) ?? []
-      return [
+      const row = sheet.addRow([
         c.id, c.tariff_name ?? c.tariff, c.company,
         c.street, c.city, c.zip, c.country, c.cin, c.tin, c.region,
-        c.contract_date ?? '', c.prog_sent_date ?? '',
-        c.prog_lent_date ?? '', c.admittance_date ?? '',
+        c.contract_date ?? null, c.prog_sent_date ?? null,
+        c.prog_lent_date ?? null, c.admittance_date ?? null,
         ct['phone1'] ?? ct['phone'] ?? '',
         ct['gsm1']   ?? ct['gsm']   ?? '',
         ct['email1'] ?? ct['email'] ?? '',
         ct['fax'] ?? '',
         ps.join(', '),
-      ].map(escape).join(',')
-    })
+      ])
+      for (const col of DATE_COLS) {
+        const cell = row.getCell(col)
+        if (cell.value instanceof Date) cell.numFmt = DATE_FMT
+      }
+    }
 
-    const csv = [headers.map(escape).join(','), ...rows].join('\r\n')
+    const buffer = await workbook.xlsx.writeBuffer()
 
     return reply
-      .header('Content-Type', 'text/csv; charset=utf-8')
-      .header('Content-Disposition', 'attachment; filename="export.csv"')
-      .send('\uFEFF' + csv)  // BOM pro správné zobrazení v Excelu
+      .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+      .header('Content-Disposition', 'attachment; filename="export.xlsx"')
+      .send(Buffer.from(buffer))
     } finally {
       await sql.end()
     }

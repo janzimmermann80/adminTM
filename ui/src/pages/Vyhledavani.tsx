@@ -3,7 +3,7 @@ import { Layout } from '../components/Layout'
 import { Spinner } from '../components/Spinner'
 import { Pagination } from '../components/Pagination'
 import { CompanyDetailModal } from '../components/CompanyDetailModal'
-import { search, getSearchMeta, deleteCompany } from '../api'
+import { search, getSearchMeta, deleteCompany, exportXlsx } from '../api'
 import { formatDate } from '../utils'
 import type { SearchMeta } from '../types'
 
@@ -265,6 +265,7 @@ export const Vyhledavani = () => {
   const [lastMode, setLastMode] = useState<'contains' | 'begins' | 'selecting'>('contains')
   const [order, setOrder] = useState<string>('company')
   const [deletingKey, setDeletingKey] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
   const firstRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -333,6 +334,30 @@ export const Vyhledavani = () => {
   const handlePage = (newOffset: number) => {
     doSearch(newOffset, lastMode, order)
     window.scrollTo(0, 0)
+  }
+
+  // Export všech záznamů odpovídajících aktuálnímu filtrování (bez stránkování)
+  const handleExport = async () => {
+    if (exporting) return
+    setExporting(true)
+    setError('')
+    try {
+      const p = buildParams(0, 'selecting')
+      p.limit = undefined
+      p.offset = undefined
+      p.order = undefined
+      const blob = await exportXlsx(p)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `export-${new Date().toISOString().slice(0, 10)}.xlsx`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setExporting(false)
+    }
   }
 
   const handleDelete = async (c: any) => {
@@ -553,6 +578,17 @@ export const Vyhledavani = () => {
               <button onClick={() => setFilter(emptyFilter())}
                 className="px-4 py-1.5 border border-gray-300 hover:bg-gray-50 text-gray-600 text-sm rounded-lg">
                 Smaž vše
+              </button>
+              <button onClick={handleExport} disabled={exporting}
+                title="Exportovat všechny záznamy odpovídající filtru do Excelu"
+                className="ml-auto px-4 py-1.5 border border-[#0a6b6b] text-[#0a6b6b] hover:bg-teal-50 text-sm rounded-lg disabled:opacity-50 flex items-center gap-1.5">
+                {exporting ? <Spinner size={3} /> : (
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                  </svg>
+                )}
+                {exporting ? 'Exportuji…' : 'Export XLSX'}
               </button>
             </div>
           </div>

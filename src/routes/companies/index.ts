@@ -547,9 +547,12 @@ export async function companiesRoutes(app: FastifyInstance) {
 
     try {
       const rows = await sql`
-        SELECT C.car_key, C.spz, C.make, NOT C.inactive AS active, C.production_year,
+        SELECT C.car_key, C.spz, C.make, NOT C.inactive AS active, C.type, C.color,
+               EXTRACT(YEAR FROM C.production_year)::int AS production_year,
+               C.vin, C.engine_power, C.tank_volume, C.consumption_avg,
+               C.adr, C.description,
                C.tonnage, C.capacity, C.axles, C.euro_emission, C.length, C.width, C.height,
-               C.sim_imsi, C.export_allowed, C.driver_key, C.driver2_key, C.person_key,
+               C.sim_imsi, C.export_allowed, C.export_requested, C.driver_key, C.driver2_key, C.person_key,
                C.stazka_certified, C.home_stand_key,
                M.name AS home_stand_name, M.zip AS home_stand_zip, M.country AS home_stand_country
         FROM gps.car_base C
@@ -571,17 +574,44 @@ export async function companiesRoutes(app: FastifyInstance) {
     const sql = getUserSql(userDb, passwordDb)
     const { id } = request.params as { id: string }
     const body = request.body as {
-      spz: string; make?: string; tonnage?: number; capacity?: number
-      euro_emission?: string; axles?: number; stazka_certified?: boolean; home_stand_key?: number
+      spz: string; make?: string; type?: string | null; color?: string | null
+      production_year?: number | null; vin?: string | null
+      tonnage?: number | null; capacity?: number | null
+      euro_emission?: string | null; axles?: number | null
+      length?: number | null; width?: number | null; height?: number | null
+      engine_power?: number | null; tank_volume?: number | null; consumption_avg?: number | null
+      adr?: number | null; description?: string | null
+      sim_imsi?: string | null; driver_key?: number | null; driver2_key?: number | null
+      person_key?: number | null; active?: boolean
+      export_allowed?: boolean; export_requested?: boolean
+      stazka_certified?: boolean; home_stand_key?: number | null
     }
+
+    // gps.car_base má NOT NULL bez defaultu: spz, production_year, type, tonnage
+    if (!body.spz?.trim())             return reply.code(400).send({ error: 'SPZ je povinná' })
+    if (body.production_year == null)  return reply.code(400).send({ error: 'Rok výroby je povinný' })
+    if (!body.type)                    return reply.code(400).send({ error: 'Typ vozidla je povinný' })
+    if (body.tonnage == null)          return reply.code(400).send({ error: 'Nosnost je povinná' })
 
     try {
       const [row] = await sql`
-        INSERT INTO gps.car_base (company_key, spz, make, tonnage, capacity, euro_emission, axles,
+        INSERT INTO gps.car_base (company_key, spz, make, type, color, production_year, vin,
+                                  tonnage, capacity, euro_emission, axles, length, width, height,
+                                  engine_power, tank_volume, consumption_avg, adr, description,
+                                  sim_imsi, driver_key, driver2_key, person_key,
+                                  export_allowed, export_requested,
                                   stazka_certified, home_stand_key, inactive)
-        VALUES (${id}, ${body.spz}, ${body.make ?? ''}, ${body.tonnage ?? null},
-                ${body.capacity ?? null}, ${body.euro_emission ?? null}, ${body.axles ?? null},
-                ${body.stazka_certified ?? false}, ${body.home_stand_key ?? null}, false)
+        VALUES (${id}, ${body.spz.trim()}, ${body.make ?? ''}, ${body.type}, ${body.color ?? null},
+                make_date(${body.production_year}, 1, 1), ${body.vin ?? null},
+                ${body.tonnage}, ${body.capacity ?? null}, ${body.euro_emission ?? null},
+                ${body.axles ?? null}, ${body.length ?? null}, ${body.width ?? null}, ${body.height ?? null},
+                ${body.engine_power ?? null}, ${body.tank_volume ?? null}, ${body.consumption_avg ?? null},
+                ${body.adr ?? null}, ${body.description ?? null},
+                ${body.sim_imsi ?? null}, ${body.driver_key ?? null}, ${body.driver2_key ?? null},
+                ${body.person_key ?? null},
+                ${body.export_allowed ?? false}, ${body.export_requested ?? false},
+                ${body.stazka_certified ?? false}, ${body.home_stand_key ?? null},
+                ${!(body.active ?? true)})
         RETURNING car_key
       `
       return reply.code(201).send(row)
@@ -598,21 +628,46 @@ export async function companiesRoutes(app: FastifyInstance) {
     const sql = getUserSql(userDb, passwordDb)
     const { vid } = request.params as { id: string; vid: string }
     const body = request.body as {
-      spz?: string; make?: string; tonnage?: number | null; capacity?: number | null
+      spz?: string; make?: string; type?: string | null; color?: string | null
+      production_year?: number | null; vin?: string | null
+      tonnage?: number | null; capacity?: number | null
       euro_emission?: string | null; axles?: number | null; active?: boolean
+      length?: number | null; width?: number | null; height?: number | null
+      engine_power?: number | null; tank_volume?: number | null; consumption_avg?: number | null
+      adr?: number | null; description?: string | null
+      export_allowed?: boolean; export_requested?: boolean
       stazka_certified?: boolean; home_stand_key?: number | null
       driver_key?: number | null; driver2_key?: number | null; sim_imsi?: string | null; person_key?: number | null
     }
 
     try {
+      // Pozn.: production_year, type a tonnage jsou NOT NULL — null znamená „ponechat původní"
       await sql`
         UPDATE gps.car_base SET
           spz               = COALESCE(${body.spz ?? null}, spz),
           make              = COALESCE(${body.make ?? null}, make),
-          tonnage           = ${body.tonnage !== undefined ? body.tonnage : sql`tonnage`},
+          type              = ${body.type || sql`type`},
+          color             = ${body.color !== undefined ? body.color : sql`color`},
+          production_year   = ${body.production_year == null
+                                ? sql`production_year`
+                                : sql`CASE WHEN EXTRACT(YEAR FROM production_year) = ${body.production_year}::int
+                                           THEN production_year
+                                           ELSE make_date(${body.production_year}::int, 1, 1) END`},
+          vin               = ${body.vin !== undefined ? body.vin : sql`vin`},
+          tonnage           = ${body.tonnage ?? sql`tonnage`},
           capacity          = ${body.capacity !== undefined ? body.capacity : sql`capacity`},
           euro_emission     = ${body.euro_emission !== undefined ? body.euro_emission : sql`euro_emission`},
           axles             = ${body.axles !== undefined ? body.axles : sql`axles`},
+          length            = ${body.length !== undefined ? body.length : sql`length`},
+          width             = ${body.width !== undefined ? body.width : sql`width`},
+          height            = ${body.height !== undefined ? body.height : sql`height`},
+          engine_power      = ${body.engine_power !== undefined ? body.engine_power : sql`engine_power`},
+          tank_volume       = ${body.tank_volume !== undefined ? body.tank_volume : sql`tank_volume`},
+          consumption_avg   = ${body.consumption_avg !== undefined ? body.consumption_avg : sql`consumption_avg`},
+          adr               = ${body.adr !== undefined ? body.adr : sql`adr`},
+          description       = ${body.description !== undefined ? body.description : sql`description`},
+          export_allowed    = ${body.export_allowed !== undefined ? body.export_allowed : sql`export_allowed`},
+          export_requested  = ${body.export_requested !== undefined ? body.export_requested : sql`export_requested`},
           inactive          = ${body.active !== undefined ? !body.active : sql`inactive`},
           stazka_certified  = ${body.stazka_certified !== undefined ? body.stazka_certified : sql`stazka_certified`},
           home_stand_key    = ${body.home_stand_key !== undefined ? body.home_stand_key : sql`home_stand_key`},

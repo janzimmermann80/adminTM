@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { getVehicles, getDrivers, getSimcards, addVehicle, updateVehicle, deleteVehicle, addDriver, updateDriver, deleteDriver, getSimcardTariffs, addSimcard, updateSimcard, deleteSimcard, getSimcardUploadLog, getSimcardServiceData, getContacts } from '../../api'
+import { useState, useEffect, useRef } from 'react'
+import { getVehicles, getDrivers, getSimcards, addVehicle, updateVehicle, deleteVehicle, addDriver, updateDriver, deleteDriver, getSimcardTariffs, addSimcard, updateSimcard, deleteSimcard, getSimcardUploadLog, getSimcardServiceData, getContacts, searchCities, type CityOption } from '../../api'
 import { Spinner } from '../../components/Spinner'
 import { formatNumber } from '../../utils'
 import type { Vehicle, Driver, SimCard } from '../../types'
@@ -44,7 +44,9 @@ const Badge = ({ children, color = 'gray' }: { children: React.ReactNode; color?
   )
 }
 
-type FormData = Omit<Vehicle, 'car_key' | 'home_stand_name' | 'home_stand_zip' | 'home_stand_country'>
+type FormData = Omit<Vehicle, 'car_key' | 'home_stand_name' | 'home_stand_zip' | 'home_stand_country'> & {
+  home_stand_label?: string  // jen pro zobrazení v autocomplete (neodesílá se)
+}
 
 const emptyForm = (): FormData => ({
   spz: '',
@@ -74,6 +76,7 @@ const emptyForm = (): FormData => ({
   person_key: null,
   stazka_certified: false,
   home_stand_key: null,
+  home_stand_label: '',
 })
 
 const vehicleToForm = (v: Vehicle): FormData => ({
@@ -104,6 +107,9 @@ const vehicleToForm = (v: Vehicle): FormData => ({
   person_key: v.person_key ?? null,
   stazka_certified: v.stazka_certified ?? false,
   home_stand_key: v.home_stand_key ?? null,
+  home_stand_label: v.home_stand_name
+    ? `${v.home_stand_name} (${v.home_stand_zip}, ${v.home_stand_country})`
+    : '',
 })
 
 interface EditFormProps {
@@ -116,6 +122,79 @@ interface EditFormProps {
   onSave: () => void
   onCancel: () => void
   onDelete?: () => void
+}
+
+// Autocomplete pro výběr města z map.city (domov/parkoviště vozidla)
+const HomeStandInput = ({ valueKey, label, inputCls, onChange }: {
+  valueKey: number | null | undefined
+  label: string
+  inputCls: string
+  onChange: (cityKey: number | null, label: string) => void
+}) => {
+  const [text, setText] = useState(label)
+  const [options, setOptions] = useState<CityOption[]>([])
+  const [open, setOpen] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+
+  const handleInput = (v: string) => {
+    setText(v)
+    if (valueKey != null) onChange(null, '') // přepsáním textu se ruší vazba na město
+    if (timer.current) clearTimeout(timer.current)
+    const q = v.trim()
+    if (q.length < 2) { setOptions([]); setOpen(false); return }
+    timer.current = setTimeout(async () => {
+      try {
+        const rows = await searchCities(q)
+        setOptions(rows)
+        setOpen(rows.length > 0)
+      } catch { /* hledání měst není kritické */ }
+    }, 250)
+  }
+
+  const pick = (c: CityOption) => {
+    const lbl = `${c.name} (${c.zip}, ${c.country})`
+    setText(lbl)
+    setOpen(false)
+    onChange(c.city_key, lbl)
+  }
+
+  return (
+    <div className="relative">
+      <input
+        className={inputCls}
+        value={text}
+        onChange={e => handleInput(e.target.value)}
+        onFocus={() => { if (options.length) setOpen(true) }}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Začněte psát město…"
+      />
+      {text && (
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => { setText(''); setOptions([]); setOpen(false); onChange(null, '') }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 leading-none"
+        >×</button>
+      )}
+      {open && (
+        <ul className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto text-sm">
+          {options.map(c => (
+            <li key={c.city_key}>
+              <button
+                type="button"
+                onMouseDown={e => { e.preventDefault(); pick(c) }}
+                className="w-full text-left px-3 py-1.5 hover:bg-teal-50"
+              >
+                {c.name} <span className="text-gray-400">({c.zip}, {c.country})</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 const EditForm = ({ form, drivers, simcards, saving, isNew, onChange, onSave, onCancel, onDelete }: EditFormProps) => {
@@ -134,6 +213,16 @@ const EditForm = ({ form, drivers, simcards, saving, isNew, onChange, onSave, on
   const inputCls = 'w-full border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[#0a6b6b] focus:border-[#0a6b6b]'
   const labelCls = 'block text-xs text-gray-500 mb-0.5'
 
+  // Povinná pole: červená hvězdička + červené orámování, dokud není vyplněno
+  const Req = () => <span className="text-red-500 font-bold" title="Povinné pole"> *</span>
+  const reqInvalid = (invalid: boolean) =>
+    invalid ? ' border-red-400 bg-red-50/50 focus:ring-red-400 focus:border-red-400' : ''
+
+  const spzInvalid = !form.spz.trim()
+  const typeInvalid = !form.type
+  const yearInvalid = form.production_year == null
+  const tonnageInvalid = form.tonnage == null
+
   const activeDrivers = drivers.filter(d => d.active)
 
   return (
@@ -141,16 +230,16 @@ const EditForm = ({ form, drivers, simcards, saving, isNew, onChange, onSave, on
       {/* Row 1: SPZ, Make, Typ, Barva */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
-          <label className={labelCls}>SPZ *</label>
-          <input className={inputCls} value={form.spz} onChange={e => onChange({ spz: e.target.value })} placeholder="1AB2345" />
+          <label className={labelCls}>SPZ<Req /></label>
+          <input className={inputCls + reqInvalid(spzInvalid)} value={form.spz} onChange={e => onChange({ spz: e.target.value })} placeholder="1AB2345" />
         </div>
         <div>
           <label className={labelCls}>Výrobce</label>
           <input className={inputCls} value={form.make ?? ''} onChange={e => onChange({ make: e.target.value })} placeholder="Volvo" />
         </div>
         <div>
-          <label className={labelCls}>Typ</label>
-          <select className={inputCls} value={form.type ?? ''} onChange={e => onChange({ type: e.target.value || null })}>
+          <label className={labelCls}>Typ<Req /></label>
+          <select className={inputCls + reqInvalid(typeInvalid)} value={form.type ?? ''} onChange={e => onChange({ type: e.target.value || null })}>
             <option value="">—</option>
             {VEHICLE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
@@ -164,8 +253,8 @@ const EditForm = ({ form, drivers, simcards, saving, isNew, onChange, onSave, on
       {/* Row 2: Rok, VIN */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
-          <label className={labelCls}>Rok výroby</label>
-          <input className={inputCls} type="number" value={num(form.production_year)} onChange={e => setInt('production_year', e.target.value)} placeholder="2020" min="1980" max="2030" />
+          <label className={labelCls}>Rok výroby<Req /></label>
+          <input className={inputCls + reqInvalid(yearInvalid)} type="number" value={num(form.production_year)} onChange={e => setInt('production_year', e.target.value)} placeholder="2020" min="1980" max="2030" />
         </div>
         <div className="col-span-1 md:col-span-3">
           <label className={labelCls}>VIN</label>
@@ -176,8 +265,8 @@ const EditForm = ({ form, drivers, simcards, saving, isNew, onChange, onSave, on
       {/* Row 3: Rozměry */}
       <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
         <div>
-          <label className={labelCls}>Nosnost (t)</label>
-          <input className={inputCls} type="number" step="0.1" value={num(form.tonnage)} onChange={e => setNum('tonnage', e.target.value)} placeholder="24" />
+          <label className={labelCls}>Nosnost (t)<Req /></label>
+          <input className={inputCls + reqInvalid(tonnageInvalid)} type="number" step="0.1" value={num(form.tonnage)} onChange={e => setNum('tonnage', e.target.value)} placeholder="24" />
         </div>
         <div>
           <label className={labelCls}>Objem (m³)</label>
@@ -255,6 +344,19 @@ const EditForm = ({ form, drivers, simcards, saving, isNew, onChange, onSave, on
         </div>
       </div>
 
+      {/* Row 5b: Domov/Parkoviště */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className={labelCls}>Domov/Parkoviště</label>
+          <HomeStandInput
+            valueKey={form.home_stand_key}
+            label={form.home_stand_label ?? ''}
+            inputCls={inputCls}
+            onChange={(key, lbl) => onChange({ home_stand_key: key, home_stand_label: lbl })}
+          />
+        </div>
+      </div>
+
       {/* Row 6: ADR, Stanoviště */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
@@ -293,7 +395,9 @@ const EditForm = ({ form, drivers, simcards, saving, isNew, onChange, onSave, on
       <div className="flex items-center gap-2 pt-1">
         <button
           onClick={onSave}
-          disabled={saving || !form.spz.trim()}
+          disabled={saving || spzInvalid || typeInvalid || yearInvalid || tonnageInvalid}
+          title={(spzInvalid || typeInvalid || yearInvalid || tonnageInvalid)
+            ? 'Povinná pole: SPZ, Rok výroby, Typ, Nosnost' : ''}
           className="px-4 py-1.5 rounded-lg bg-[#0a6b6b] text-white text-sm font-medium hover:bg-[#0d8080] disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? 'Ukládám…' : isNew ? 'Přidat vozidlo' : 'Uložit'}

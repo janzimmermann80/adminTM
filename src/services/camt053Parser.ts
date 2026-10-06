@@ -85,11 +85,18 @@ export function parseCamt053(xmlContent: string): ParsedStatement {
     if (cd === 'CLBD') closingBalance = amtVal * sign
   }
 
+  // Pořadové číslo výpisu přidělené bankou (CAMT.053: ElctrncSeqNb, případně LglSeqNb)
+  const seqRaw = stmt['ElctrncSeqNb'] ?? stmt['LglSeqNb']
+  const seqNumber: number | null = seqRaw != null && seqRaw !== '' && !isNaN(Number(seqRaw))
+    ? Number(seqRaw)
+    : null
+
   // Transakce
   const entries: any[] = Array.isArray(stmt['Ntry']) ? stmt['Ntry'] : (stmt['Ntry'] ? [stmt['Ntry']] : [])
   const transactions: ParsedTransaction[] = entries.map((ntry: any) => parseEntry(ntry, currency))
 
   return {
+    seqNumber,
     accountIban,
     accountNumber,
     periodFrom,

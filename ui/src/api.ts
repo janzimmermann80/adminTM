@@ -58,12 +58,26 @@ export const search = (params: Record<string, string | number | undefined>) => {
   return get<{ total: number; limit: number; offset: number; data: any[] }>(`/search?${qs}`)
 }
 
-export const exportCsv = (keys: number[]) =>
-  fetch(buildUrl('/search/export'), {
-    method: 'POST',
-    headers: h(),
-    body: JSON.stringify({ keys }),
-  })
+// Export všech záznamů odpovídajících filtru do XLSX
+// (stejné parametry jako search(), bez limit/offset/order)
+export const exportXlsx = async (params: Record<string, string | number | undefined>): Promise<Blob> => {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== '') qs.set(k, String(v))
+  }
+  const r = await fetch(buildUrl(`/search/export?${qs}`), { headers: h() })
+  if (r.status === 401) {
+    localStorage.removeItem('token')
+    window.location.hash = '#/login'
+    throw new Error('Unauthorized')
+  }
+  if (!r.ok) {
+    let msg = 'Export selhal'
+    try { msg = (await r.json()).error ?? msg } catch {}
+    throw new Error(msg)
+  }
+  return r.blob()
+}
 
 // ── Statistics ────────────────────────────────────────────────────────────────
 
@@ -187,6 +201,10 @@ export const downloadInvoicePdf = async (id: string): Promise<Blob> => {
 
 // vehicles
 export const getVehicles = (id: string) => get<any[]>(`/companies/${id}/vehicles`)
+export type CityOption = { city_key: number; name: string; zip: string; country: string }
+export const searchCities = (q: string) =>
+  get<CityOption[]>(`/offers/cities?q=${encodeURIComponent(q)}`)
+
 export const addVehicle = (id: string, body: Record<string, any>) => post<any>(`/companies/${id}/vehicles`, body)
 export const updateVehicle = (id: string, vid: string, body: Record<string, any>) =>
   put<any>(`/companies/${id}/vehicles/${vid}`, body)
