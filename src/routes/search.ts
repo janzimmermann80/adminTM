@@ -276,7 +276,7 @@ export async function searchRoutes(app: FastifyInstance) {
 
     // Kontaktní osoby
     const persons = await sql`
-      SELECT company_key, name, importance
+      SELECT company_key, name, sex, importance
       FROM provider.contact_person
       WHERE company_key = ANY(${keys})
       ORDER BY importance
@@ -295,11 +295,12 @@ export async function searchRoutes(app: FastifyInstance) {
       if (c.type === 'F') map['fax']          = c.value
     }
 
-    const personMap = new Map<number, string[]>()
+    const personMap = new Map<number, { name: string; sex: string }[]>()
     for (const p of persons) {
       const key = Number(p.company_key)
       if (!personMap.has(key)) personMap.set(key, [])
-      personMap.get(key)!.push(p.name)
+      const sex = String(p.sex ?? '').trim()
+      personMap.get(key)!.push({ name: p.name, sex: sex !== '-' ? sex : '' })
     }
 
     const DATE_FMT = 'dd.mm.yyyy'
@@ -326,7 +327,12 @@ export async function searchRoutes(app: FastifyInstance) {
       { header: 'GSM 1',            width: 16 },
       { header: 'E-mail 1',         width: 28 },
       { header: 'Fax',              width: 16 },
-      { header: 'Kontaktní osoby',  width: 30 },
+      { header: 'Kontaktní osoba 1', width: 22 },
+      { header: 'Pohlaví 1',        width: 9 },
+      { header: 'Kontaktní osoba 2', width: 22 },
+      { header: 'Pohlaví 2',        width: 9 },
+      { header: 'Kontaktní osoba 3', width: 22 },
+      { header: 'Pohlaví 3',        width: 9 },
     ]
 
     sheet.getRow(1).font = { bold: true }
@@ -345,7 +351,9 @@ export async function searchRoutes(app: FastifyInstance) {
         ct['gsm1']   ?? ct['gsm']   ?? '',
         ct['email1'] ?? ct['email'] ?? '',
         ct['fax'] ?? '',
-        ps.join(', '),
+        ps[0]?.name ?? '', ps[0]?.sex ?? '',
+        ps[1]?.name ?? '', ps[1]?.sex ?? '',
+        ps[2]?.name ?? '', ps[2]?.sex ?? '',
       ])
       for (const col of DATE_COLS) {
         const cell = row.getCell(col)

@@ -269,8 +269,17 @@ export const Vyhledavani = () => {
   const firstRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    getSearchMeta().then(setMeta).catch(() => {})
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // Když načtení meta dat selže (např. backend se právě restartuje), zkus znovu za 3 s
+    const load = () => {
+      getSearchMeta()
+        .then(m => { if (!cancelled) setMeta(m) })
+        .catch(() => { if (!cancelled) timer = setTimeout(load, 3000) })
+    }
+    load()
     firstRef.current?.focus()
+    return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [])
 
   const t = (k: keyof TextForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
