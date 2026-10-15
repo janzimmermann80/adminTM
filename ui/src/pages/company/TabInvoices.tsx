@@ -3,6 +3,7 @@ import {
   getInvoices, getInvoiceEmailContacts, sendInvoiceEmail,
   getMailContext,
   cancelInvoice, deleteInvoice, downloadInvoicePdf,
+  type InvoiceEmailContact,
 } from '../../api'
 import { Spinner } from '../../components/Spinner'
 import { Pagination } from '../../components/Pagination'
@@ -43,10 +44,16 @@ export function InvoiceEmailModal({ inv, companyId, companyKey, onClose, onSent 
   const [sending, setSending] = useState(false)
   const [sent, setSent]   = useState(false)
   const [error, setError] = useState('')
+  const [recipients, setRecipients] = useState<InvoiceEmailContact[]>([])
 
   useEffect(() => {
     getInvoiceEmailContacts(String(inv.invoice_key))
-      .then(addrs => { if (addrs[0]) setTo(addrs[0]) })
+      .then(addrs => {
+        setRecipients(addrs)
+        // primární příjemce = Účetní (U), jinak první v seznamu
+        const primary = addrs.find(a => a.type === 'U') ?? addrs[0]
+        if (primary) setTo(primary.value)
+      })
       .catch(() => {})
     getMailContext(companyKey).then(data => {
       if (data.context) {
@@ -92,6 +99,23 @@ export function InvoiceEmailModal({ inv, companyId, companyKey, onClose, onSent 
         <div className="px-5 py-4 space-y-3">
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Komu *</label>
+            {recipients.length > 0 && (
+              <select
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 mb-1.5 bg-white"
+                value={recipients.some(r => r.value === to) ? to : ''}
+                onChange={e => { if (e.target.value) setTo(e.target.value) }}
+              >
+                <option value="">— vybrat z kontaktů firmy —</option>
+                {recipients.map(r => (
+                  <option key={`${r.type}-${r.value}`} value={r.value}>
+                    {/* Jméno osoby jen u osobních e-mailů (E) — Účetní (U) a Servis (S) jsou role bez jména */}
+                    {r.type === 'U' ? `Účetní: ${r.value}`
+                      : r.type === 'S' ? `Servis: ${r.value}`
+                      : `${r.person_name || 'E-mail'}: ${r.value}`}
+                  </option>
+                ))}
+              </select>
+            )}
             <input className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
               value={to} onChange={e => setTo(e.target.value)} placeholder="email@firma.cz"/>
           </div>

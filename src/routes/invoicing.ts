@@ -401,17 +401,23 @@ export async function invoicingRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string }
 
     try {
+      // Účetní (U) jako primární příjemce, pak osobní e-maily (E), pak Servis (S)
       const contacts = await sql`
-        SELECT ct.value
+        SELECT ct.value, btrim(ct.type) AS type, P.name AS person_name
         FROM provider.invoice I
         JOIN provider.contact ct ON ct.company_key = I.company_key
+        LEFT JOIN provider.contact_person P
+          ON P.company_key = ct.company_key AND P.importance = ct.importance
         WHERE I.invoice_key = ${id}
           AND ct.value IS NOT NULL AND ct.value != ''
-          AND ct.type IN ('U', 'E')
-        ORDER BY ct.send_tips = 't' DESC, ct.contact_key
+          AND ct.type IN ('U', 'S', 'E')
+        ORDER BY CASE ct.type WHEN 'U' THEN 0 WHEN 'E' THEN 1 ELSE 2 END,
+                 ct.send_tips = 't' DESC, ct.contact_key
         LIMIT 5
       `
-      return reply.send(contacts.map((c: any) => c.value))
+      // stejná adresa může být u více osob — v seznamu jen jednou
+      const unique = contacts.filter((c: any, i: number) => contacts.findIndex((x: any) => x.value === c.value) === i)
+      return reply.send(unique)
     } catch (err: any) {
       return reply.code(500).send({ error: err.message })
     } finally {

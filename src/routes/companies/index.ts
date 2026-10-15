@@ -102,6 +102,11 @@ export async function companiesRoutes(app: FastifyInstance) {
                C.country, C.cin, C.tin, C.bank, C.account, C.branch,
                C.tariff, C.region, C.provider, C.last_modif, C.parent_key,
                T.name AS tariff_name,
+               -- Web firmy je uložen jako firemní kontakt typu 'H' (importance NULL)
+               (SELECT CT.value FROM provider.contact CT
+                 WHERE CT.company_key = C.company_key AND CT.type = 'H'
+                 ORDER BY CT.importance NULLS FIRST, CT.contact_key
+                 LIMIT 1) AS url,
                CD.credit_tip_sms, CD.contract, CD.contract_date,
                CD.prog_sent, CD.prog_sent_date, CD.prog_lent, CD.prog_lent_date,
                CD.prog_purchased, CD.prog_purchased_date,
@@ -264,6 +269,7 @@ export async function companiesRoutes(app: FastifyInstance) {
       company?: string; street?: string; city?: string; zip?: string
       country?: string; cin?: string; tin?: string; bank?: string
       account?: string; branch?: string; tariff?: string; region?: string
+      url?: string
     }
 
     // last_modif je timestamp — bindujeme Date objekt (postgres.js serializuje správně).
@@ -271,23 +277,46 @@ export async function companiesRoutes(app: FastifyInstance) {
     const now = new Date()
 
     try {
-      await sql`
-        UPDATE provider.company SET
-          company = COALESCE(${body.company ?? null}, company),
-          street  = COALESCE(${body.street ?? null}, street),
-          city    = COALESCE(${body.city ?? null}, city),
-          zip     = COALESCE(${body.zip ?? null}, zip),
-          country = COALESCE(${body.country ?? null}, country),
-          cin     = COALESCE(${body.cin ?? null}, cin),
-          tin     = COALESCE(${body.tin ?? null}, tin),
-          bank    = COALESCE(${body.bank ?? null}, bank),
-          account = COALESCE(${body.account ?? null}, account),
-          branch  = COALESCE(NULLIF(${body.branch ?? null}, ''), branch),
-          tariff  = COALESCE(NULLIF(${body.tariff ?? null}, ''), tariff),
-          region  = COALESCE(${body.region ?? null}, region),
-          last_modif = ${now}
-        WHERE company_key = ${id}
-      `
+      await sql.begin((async (tx: any) => {
+        await tx`
+          UPDATE provider.company SET
+            company = COALESCE(${body.company ?? null}, company),
+            street  = COALESCE(${body.street ?? null}, street),
+            city    = COALESCE(${body.city ?? null}, city),
+            zip     = COALESCE(${body.zip ?? null}, zip),
+            country = COALESCE(${body.country ?? null}, country),
+            cin     = COALESCE(${body.cin ?? null}, cin),
+            tin     = COALESCE(${body.tin ?? null}, tin),
+            bank    = COALESCE(${body.bank ?? null}, bank),
+            account = COALESCE(${body.account ?? null}, account),
+            branch  = COALESCE(NULLIF(${body.branch ?? null}, ''), branch),
+            tariff  = COALESCE(NULLIF(${body.tariff ?? null}, ''), tariff),
+            region  = COALESCE(${body.region ?? null}, region),
+            last_modif = ${now}
+          WHERE company_key = ${id}
+        `
+
+        // Web firmy = firemní kontakt typu 'H' (importance NULL); prázdná hodnota ho smaže
+        if (body.url !== undefined && body.url !== null) {
+          const url = String(body.url).trim().slice(0, 150)
+          const [web] = await tx`
+            SELECT contact_key FROM provider.contact
+            WHERE company_key = ${id} AND type = 'H'
+            ORDER BY importance NULLS FIRST, contact_key
+            LIMIT 1
+          `
+          if (!url) {
+            if (web) await tx`DELETE FROM provider.contact WHERE contact_key = ${web.contact_key}`
+          } else if (web) {
+            await tx`UPDATE provider.contact SET value = ${url} WHERE contact_key = ${web.contact_key}`
+          } else {
+            await tx`
+              INSERT INTO provider.contact (company_key, importance, type, value, send_tips, by_name, local_tips, forward_tm)
+              VALUES (${id}, NULL, 'H', ${url}, false, false, true, false)
+            `
+          }
+        }
+      }) as any)
       return reply.send({ success: true })
     } finally {
       await sql.end()
@@ -916,9 +945,38 @@ export async function companiesRoutes(app: FastifyInstance) {
     const body = request.body as { importance: number; type: string; value: string; send_tips?: boolean; forward_tm?: boolean }
 
     try {
+      let importance = body.importance
+
+      // „Firemní kontakt" (UI posílá importance 0): FK contact_company_key_fkey vyžaduje
+      // existující kontaktní osobu — přiřadíme kontakt první osobě, která ještě nemá
+      // kontakt tohoto typu (UNIQUE company_key+importance+type)
+      if (importance === 0) {
+        const [{ cnt }] = await sql`
+          SELECT count(*)::int AS cnt FROM provider.contact_person WHERE company_key = ${id}
+        `
+        if (cnt === 0) {
+          return reply.code(400).send({ error: 'Nejprve firmě přidejte kontaktní osobu' })
+        }
+        const [free] = await sql`
+          SELECT P.importance
+          FROM provider.contact_person P
+          WHERE P.company_key = ${id}
+            AND NOT EXISTS (
+              SELECT 1 FROM provider.contact C
+              WHERE C.company_key = P.company_key AND C.importance = P.importance AND C.type = ${body.type}
+            )
+          ORDER BY P.importance
+          LIMIT 1
+        `
+        if (!free) {
+          return reply.code(400).send({ error: 'Kontakt tohoto typu již u všech kontaktních osob existuje' })
+        }
+        importance = free.importance
+      }
+
       const [row] = await sql`
         INSERT INTO provider.contact (company_key, importance, type, value, send_tips, by_name, local_tips, forward_tm)
-        VALUES (${id}, ${body.importance}, ${body.type}, ${body.value},
+        VALUES (${id}, ${importance}, ${body.type}, ${body.value},
                 ${body.send_tips ?? false}, false, false, ${body.forward_tm ?? false})
         RETURNING contact_key
       `
@@ -1158,6 +1216,25 @@ export async function companiesRoutes(app: FastifyInstance) {
         LIMIT 200
       `
       return reply.send(rows)
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // DELETE /api/companies/:id/online-log
+  app.delete('/:id/online-log', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id } = request.params as { id: string }
+
+    try {
+      const [company] = await sql`SELECT company_key FROM provider.company WHERE company_key = ${id}`
+      if (!company) return reply.code(404).send({ error: 'Firma nenalezena' })
+
+      const deleted = await sql`DELETE FROM provider.log_internet WHERE company_key = ${id}`
+      return reply.send({ success: true, deleted_count: deleted.count })
     } finally {
       await sql.end()
     }

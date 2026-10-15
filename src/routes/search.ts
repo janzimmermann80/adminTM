@@ -309,6 +309,7 @@ export async function searchRoutes(app: FastifyInstance) {
     const sheet = workbook.addWorksheet('Export')
 
     sheet.columns = [
+      { header: 'company_key',      width: 13 },
       { header: 'ID',               width: 10 },
       { header: 'Tarif',            width: 22 },
       { header: 'Název',            width: 36 },
@@ -337,13 +338,13 @@ export async function searchRoutes(app: FastifyInstance) {
 
     sheet.getRow(1).font = { bold: true }
 
-    const DATE_COLS = [11, 12, 13, 14]
+    const DATE_COLS = [12, 13, 14, 15]
 
     for (const c of companies) {
       const ct = contactMap.get(Number(c.company_key)) ?? {}
       const ps = personMap.get(Number(c.company_key)) ?? []
       const row = sheet.addRow([
-        c.id, c.tariff_name ?? c.tariff, c.company,
+        c.company_key, c.id, c.tariff_name ?? c.tariff, c.company,
         c.street, c.city, c.zip, c.country, c.cin, c.tin, c.region,
         c.contract_date ?? null, c.prog_sent_date ?? null,
         c.prog_lent_date ?? null, c.admittance_date ?? null,

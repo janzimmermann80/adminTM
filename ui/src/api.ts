@@ -177,7 +177,10 @@ export const getInvoicingList = (params: {
 export const getUnpaidInvoicesCount = (companyKey: string) =>
   get<{ count: number }>(`/companies/${companyKey}/invoices/count-unpaid`)
 export const getInvoiceDetail = (id: string) => get<any>(`/invoicing/${id}`)
-export const getInvoiceEmailContacts = (id: string) => get<string[]>(`/invoicing/${id}/email-contacts`)
+// type: 'U' = Účetní, 'S' = Servis, 'E' = osobní e-mail; person_name = jméno kontaktní osoby (pokud existuje)
+export type InvoiceEmailContact = { value: string; type: string; person_name?: string | null }
+export const getInvoiceEmailContacts = (id: string) =>
+  get<InvoiceEmailContact[]>(`/invoicing/${id}/email-contacts`)
 export const sendInvoiceEmail = (id: string, body: { to: string; cc?: string; subject: string; body: string }) =>
   post<{ ok: boolean }>(`/invoicing/${id}/send-email`, body)
 export const settleInvoice = (id: string, date?: string) =>
