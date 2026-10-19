@@ -1209,13 +1209,48 @@ export async function companiesRoutes(app: FastifyInstance) {
 
     try {
       const rows = await sql`
-        SELECT action, time, detail
+        SELECT action, time, detail,
+               tableoid::text || '-' || ctid::text || '-' || xmin::text AS row_id
         FROM provider.log_internet
         WHERE company_key = ${id}
         ORDER BY time DESC
         LIMIT 200
       `
       return reply.send(rows)
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // DELETE /api/companies/:id/online-log/:rowId
+  app.delete('/:id/online-log/:rowId', {
+    onRequest: [(app as any).authenticate],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['id', 'rowId'],
+        properties: {
+          id: { type: 'string', pattern: '^[0-9]+$' },
+          rowId: { type: 'string', pattern: '^[0-9]+-\\([0-9]+,[0-9]+\\)-[0-9]+$' },
+        },
+      },
+    },
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    const { id, rowId } = request.params as { id: string; rowId: string }
+
+    try {
+      // No primary key: include the tuple version so stale UI rows cannot delete a reused tuple.
+      const deleted = await sql`
+        DELETE FROM provider.log_internet
+        WHERE company_key = ${id}
+          AND tableoid::text || '-' || ctid::text || '-' || xmin::text = ${rowId}
+      `
+      if (deleted.count === 0) {
+        return reply.code(404).send({ error: 'Záznam připojení již neexistuje nebo se změnil. Obnovte seznam.' })
+      }
+      return reply.send({ success: true, deleted_count: deleted.count })
     } finally {
       await sql.end()
     }

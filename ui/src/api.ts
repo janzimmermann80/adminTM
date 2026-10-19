@@ -247,7 +247,15 @@ export const updateNote = (id: string, nid: string, body: Record<string, any>) =
 export const deleteNote = (id: string, nid: string) => del<any>(`/companies/${id}/notes/${nid}`)
 
 // online log
-export const getOnlineLog = (id: string) => get<any[]>(`/companies/${id}/online-log`)
+export interface OnlineLog {
+  row_id: string
+  action: string | null
+  time: string
+  detail: string | null
+}
+export const getOnlineLog = (id: string) => get<OnlineLog[]>(`/companies/${id}/online-log`)
+export const deleteOnlineLog = (id: string, rowId: string) =>
+  del<{ success: boolean; deleted_count: number }>(`/companies/${id}/online-log/${encodeURIComponent(rowId)}`)
 
 export const getImpersonateUrl = (id: string, type: string, username: string) =>
   get<{ url: string }>(`/companies/${id}/impersonate?type=${encodeURIComponent(type)}&username=${encodeURIComponent(username)}`)
@@ -520,4 +528,3 @@ export const getImports = () => get<ImportServiceRow[]>('/imports')
 
 export const getImportCars = (companyKey: number, importType: string) =>
   get<ImportCarRow[]>(`/imports/${companyKey}/${encodeURIComponent(importType)}/cars`)
-

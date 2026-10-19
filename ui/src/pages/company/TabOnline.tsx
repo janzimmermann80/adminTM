@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getOnlineLog } from '../../api'
+import { getOnlineLog, deleteOnlineLog, type OnlineLog } from '../../api'
 import { Spinner } from '../../components/Spinner'
 
 interface Props { companyKey: string }
@@ -7,22 +7,48 @@ interface Props { companyKey: string }
 const PAGE_SIZE = 20
 
 export const TabOnline = ({ companyKey }: Props) => {
-  const [rows, setRows] = useState<any[]>([])
+  const [rows, setRows] = useState<OnlineLog[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [page, setPage] = useState(0)
   const [filter, setFilter] = useState('')
+  const [deleting, setDeleting] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
 
   useEffect(() => {
+    let active = true
     setLoading(true)
+    setError('')
+    setPage(0)
+    setFilter('')
     getOnlineLog(companyKey)
-      .then(setRows)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }, [companyKey])
+      .then(data => { if (active) setRows(data) })
+      .catch(e => { if (active) setError(e.message) })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [companyKey, reload])
+
+  const handleDelete = async (row: OnlineLog) => {
+    if (deleting || !confirm('Smazat tento záznam připojení? Tuto akci nelze vrátit zpět.')) return
+    setDeleting(row.row_id)
+    setError('')
+    try {
+      await deleteOnlineLog(companyKey, row.row_id)
+      const data = await getOnlineLog(companyKey)
+      setRows(data)
+      const matching = filter
+        ? data.filter(r => (r.action ?? '').toLowerCase().includes(filter.toLowerCase()) ||
+            (r.detail ?? '').toLowerCase().includes(filter.toLowerCase()))
+        : data
+      setPage(p => Math.min(p, Math.max(0, Math.ceil(matching.length / PAGE_SIZE) - 1)))
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Chyba při mazání záznamu připojení')
+    } finally {
+      setDeleting(null)
+    }
+  }
 
   if (loading) return <div className="flex justify-center py-16"><Spinner size={8} /></div>
-  if (error) return <div className="text-red-600 text-sm p-4">{error}</div>
 
   const filtered = filter
     ? rows.filter(r =>
@@ -43,6 +69,7 @@ export const TabOnline = ({ companyKey }: Props) => {
 
   return (
     <div>
+      {error && <div role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">{error}</div>}
       {/* Toolbar */}
       <div className="flex items-center gap-3 mb-4">
         <div className="relative flex-1 max-w-xs">
@@ -57,6 +84,15 @@ export const TabOnline = ({ companyKey }: Props) => {
           />
         </div>
         <span className="text-sm text-gray-400">{filtered.length} záznamů</span>
+        <button
+          type="button"
+          title="Smazat záznam připojení"
+          disabled={deleting !== null}
+          onClick={() => setReload(r => r + 1)}
+          className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-40"
+        >
+          Obnovit
+        </button>
       </div>
 
       {filtered.length === 0 ? (
@@ -70,14 +106,30 @@ export const TabOnline = ({ companyKey }: Props) => {
                   <th className="text-left px-4 py-2.5 font-medium w-48">Datum a čas</th>
                   <th className="text-left px-4 py-2.5 font-medium w-40">Akce</th>
                   <th className="text-left px-4 py-2.5 font-medium">Detail</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Akce</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {paged.map((row, i) => (
-                  <tr key={i} className="hover:bg-gray-50 transition-colors">
+                {paged.map(row => (
+                  <tr key={row.row_id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-2 font-mono text-xs text-gray-500 whitespace-nowrap">{formatDt(row.time)}</td>
                     <td className="px-4 py-2 text-gray-700 whitespace-nowrap">{row.action ?? '—'}</td>
                     <td className="px-4 py-2 text-gray-500 text-xs break-all">{row.detail ?? ''}</td>
+                    <td className="px-4 py-2 text-right">
+                      <button
+                        type="button"
+                        aria-label={`Smazat záznam připojení ${formatDt(row.time)}`}
+                        disabled={deleting !== null}
+                        onClick={() => handleDelete(row)}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
+                      >
+                        {deleting === row.row_id ? <Spinner size={4} /> : (
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        )}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

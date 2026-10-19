@@ -38,9 +38,10 @@ interface Props {
   companyKey: string
   initialTab?: string
   onClose?: () => void
+  updateDocumentTitle?: boolean
 }
 
-export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }: Props) => {
+export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose, updateDocumentTitle = false }: Props) => {
   const navigate = useNavigate()
   const { user } = useAuth()
   const [company, setCompany] = useState<ICompanyDetail | null>(null)
@@ -174,6 +175,13 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose }:
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }, [companyKey])
+
+  useEffect(() => {
+    if (!updateDocumentTitle || !company) return
+    const previousTitle = document.title
+    document.title = [company.id?.trim(), company.company?.trim()].filter(Boolean).join(' ')
+    return () => { document.title = previousTitle }
+  }, [updateDocumentTitle, company?.id, company?.company])
 
   if (loading) return (
     <div className="flex justify-center py-24"><Spinner size={10} /></div>
