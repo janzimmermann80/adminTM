@@ -453,6 +453,8 @@ export type ApiRequestsByCompanyRow = {
   place_details_czk: number
   tollguru_route_cost: number
   tollguru_route_cost_czk: number
+  openai_disponent: number
+  openai_disponent_czk: number
   occurrence_count: number
   total_czk: number
   usd_rate: number

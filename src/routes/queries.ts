@@ -238,8 +238,8 @@ export async function queriesRoutes(app: FastifyInstance) {
           sum(E.price) FILTER (WHERE E.type = 'openai-asistent')::numeric AS openai_asistent_usd,
           count(*) FILTER (WHERE E.type = 'place-details')::int AS place_details,
           sum(E.price) FILTER (WHERE E.type = 'place-details')::numeric AS place_details_usd,
-          count(*) FILTER (WHERE E.type = 'tollguru-route-cost')::int AS tollguru_route_cost,
-          sum(E.price) FILTER (WHERE E.type = 'tollguru-route-cost')::numeric AS tollguru_route_cost_usd,
+          count(*) FILTER (WHERE E.type = 'openai-disponent')::int AS openai_disponent,
+          sum(E.price) FILTER (WHERE E.type = 'openai-disponent')::numeric AS openai_disponent_usd,
           count(*)::int AS occurrence_count,
           sum(E.price)::numeric AS total_usd
         FROM provider.external_api_requests AS E
@@ -275,6 +275,8 @@ export async function queriesRoutes(app: FastifyInstance) {
         place_details_czk: czk(r.place_details_usd),
         tollguru_route_cost: r.tollguru_route_cost,
         tollguru_route_cost_czk: czk(r.tollguru_route_cost_usd),
+        openai_disponent: r.openai_disponent,
+        openai_disponent_czk: czk(r.openai_disponent_usd),
         occurrence_count: r.occurrence_count,
         total_czk: czk(r.total_usd),
         usd_rate: usdRounded,

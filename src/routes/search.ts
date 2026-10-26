@@ -27,6 +27,8 @@ interface SearchQuery {
   contract_date_null?: string   // 'true'
   prog_lent_date?: string
   prog_lent_date_op?: string    // >= | <= | =
+  contract_date?: string        // Leták
+  contract_date_op?: string
   prog_sent_date?: string
   prog_sent_date_op?: string
   admittance_date?: string
@@ -127,6 +129,10 @@ function buildSearchWhere(q: SearchQuery): { whereSQL: string; params: unknown[]
   if (q.prog_lent_date) {
     const op = validOps.includes(q.prog_lent_date_op ?? '') ? q.prog_lent_date_op : '>='
     detailClauses.push(`prog_lent_date ${op} ${addParam(q.prog_lent_date)}`)
+  }
+  if (q.contract_date) {
+    const op = validOps.includes(q.contract_date_op ?? '') ? q.contract_date_op : '='
+    detailClauses.push(`contract_date ${op} ${addParam(q.contract_date)}`)
   }
   if (q.prog_sent_date) {
     const op = validOps.includes(q.prog_sent_date_op ?? '') ? q.prog_sent_date_op : '>='

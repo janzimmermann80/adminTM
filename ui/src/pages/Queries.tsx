@@ -618,8 +618,8 @@ const ARBC_COLS: { key: keyof ApiRequestsByCompanyRow; czk: keyof ApiRequestsByC
   { key: 'geocoding',           czk: 'geocoding_czk',           label: 'geocoding' },
   { key: 'openai_pdf',          czk: 'openai_pdf_czk',          label: 'openai-pdf' },
   { key: 'openai_asistent',     czk: 'openai_asistent_czk',     label: 'AI asistent' },
+  { key: 'openai_disponent',    czk: 'openai_disponent_czk',    label: 'AI disponent' },
   { key: 'here_route_cost',     czk: 'here_route_cost_czk',     label: 'here-route-cost' },
-  { key: 'tollguru_route_cost', czk: 'tollguru_route_cost_czk', label: 'tollguru-route-cost' },
 ]
 
 const fmtCzk = (n: number) =>

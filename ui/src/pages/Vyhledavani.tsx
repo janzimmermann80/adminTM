@@ -33,7 +33,7 @@ interface FilterForm {
   contract_date_from: string; contract_date_to: string
   prog_lent_date: string; prog_lent_date_op: string
   admittance_date: string; admittance_date_op: string
-  prog_sent_date: string; prog_sent_date_op: string
+  contract_date: string; contract_date_op: string
   note_from: string; note_to: string
   region: string; zip: string; country: string
   note_type: string; note_creator: string
@@ -57,7 +57,7 @@ const emptyFilter = (): FilterForm => ({
   contract_date_from: '', contract_date_to: '',
   prog_lent_date: '', prog_lent_date_op: '>=',
   admittance_date: '', admittance_date_op: '>=',
-  prog_sent_date: '', prog_sent_date_op: '>=',
+  contract_date: '', contract_date_op: '>=',
   note_from: '', note_to: '',
   region: '', zip: '', country: '',
   note_type: '', note_creator: '',
@@ -310,7 +310,7 @@ export const Vyhledavani = () => {
       if (filter.contract_date_to)      p.contract_date_to = filter.contract_date_to
       if (filter.prog_lent_date)        { p.prog_lent_date = filter.prog_lent_date; p.prog_lent_date_op = filter.prog_lent_date_op }
       if (filter.admittance_date)       { p.admittance_date = filter.admittance_date; p.admittance_date_op = filter.admittance_date_op }
-      if (filter.prog_sent_date)        { p.prog_sent_date = filter.prog_sent_date; p.prog_sent_date_op = filter.prog_sent_date_op }
+      if (filter.contract_date)         { p.contract_date = filter.contract_date; p.contract_date_op = filter.contract_date_op }
       if (filter.note_from)             p.note_from = filter.note_from
       if (filter.note_to)               p.note_to = filter.note_to
       if (filter.region)                p.region = filter.region
@@ -543,10 +543,10 @@ export const Vyhledavani = () => {
                       <input className={inpSm} value={filter.zip} onChange={f('zip')} />
                     </div>
                   </td>
-                  <td className="text-xs text-gray-500 pl-3 pr-1 py-1 whitespace-nowrap">Program:</td>
-                  <td className="py-1"><input type="date" className={inp} value={filter.prog_sent_date} onChange={f('prog_sent_date')} /></td>
+                  <td className="text-xs text-gray-500 pl-3 pr-1 py-1 whitespace-nowrap">Leták:</td>
+                  <td className="py-1"><input type="date" className={inp} value={filter.contract_date} onChange={f('contract_date')} /></td>
                   <td className="py-1 pl-1">
-                    <select value={filter.prog_sent_date_op} onChange={f('prog_sent_date_op')} className="border border-gray-300 rounded px-1 py-1 text-xs outline-none">
+                    <select value={filter.contract_date_op} onChange={f('contract_date_op')} className="border border-gray-300 rounded px-1 py-1 text-xs outline-none">
                       <option>&gt;=</option><option>&lt;=</option><option>=</option>
                     </select>
                   </td>
