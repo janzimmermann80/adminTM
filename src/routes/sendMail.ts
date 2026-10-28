@@ -1,12 +1,21 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getUserSql } from '../db/userSql.js'
 import nodemailer from 'nodemailer'
+import { resolve } from 'node:path'
 
 const SENDERS = {
   A: { name: 'Euro Sped Online', email: 'info@euro-sped.cz' },
   B: { name: 'e-sped', email: 'info@e-sped.cz' },
   C: { name: 'TopTrucks.cz', email: 'info@toptrucks.cz' },
   D: { name: 'TruckManager.eu', email: 'info@truckmanager.eu' },
+}
+
+function emailTemplatesPath() {
+  const configuredPath = process.env.EMAIL_TEMPLATES_PATH
+  if (configuredPath) return resolve(configuredPath)
+  return process.env.NODE_ENV === 'production'
+    ? '/data/email_templates.json'
+    : resolve(process.cwd(), 'data', 'email_templates.json')
 }
 
 // Dosadí volitelné hodnoty (např. username/password konkrétního účtu) do <+key+> placeholderů
@@ -231,12 +240,15 @@ export async function sendMailRoutes(app: FastifyInstance) {
     onRequest: [(app as any).authenticate],
   }, async (_request: FastifyRequest, reply: FastifyReply) => {
     const fs = await import('fs/promises')
-    const path = process.env.EMAIL_TEMPLATES_PATH ?? '/home/dev/email_templates.json'
+    const path = emailTemplatesPath()
     try {
       const data = await fs.readFile(path, 'utf-8')
       return reply.send(JSON.parse(data))
-    } catch {
-      return reply.send([])
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        return reply.send([])
+      }
+      throw error
     }
   })
 
@@ -245,9 +257,32 @@ export async function sendMailRoutes(app: FastifyInstance) {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
     const fs = await import('fs/promises')
-    const path = process.env.EMAIL_TEMPLATES_PATH ?? '/home/dev/email_templates.json'
-    const body = request.body as any[]
-    await fs.writeFile(path, JSON.stringify(body, null, 2), 'utf-8')
+    const path = emailTemplatesPath()
+    if (!Array.isArray(request.body) || request.body.length > 500) {
+      return reply.code(400).send({ error: 'Neplatný seznam e-mailových vzorů.' })
+    }
+
+    const body = request.body as unknown[]
+    const isTemplate = (value: unknown): value is {
+      id: string; group: string; label: string; subject: string; text: string; note_type: string
+    } => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+      const template = value as Record<string, unknown>
+      return ['id', 'group', 'label', 'subject', 'text', 'note_type'].every(key =>
+        typeof template[key] === 'string'
+      )
+    }
+    if (!body.every(isTemplate)) {
+      return reply.code(400).send({ error: 'Každý vzor musí obsahovat textová pole id, group, label, subject, text a note_type.' })
+    }
+
+    const serialized = JSON.stringify(body, null, 2)
+    if (Buffer.byteLength(serialized, 'utf-8') > 2_000_000) {
+      return reply.code(413).send({ error: 'Soubor e-mailových vzorů je příliš velký.' })
+    }
+
+    await fs.mkdir(resolve(path, '..'), { recursive: true })
+    await fs.writeFile(path, serialized, 'utf-8')
     return reply.send({ success: true })
   })
 }

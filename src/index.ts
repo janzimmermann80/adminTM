@@ -20,6 +20,7 @@ import { queriesRoutes } from './routes/queries.js'
 import { workersRoutes } from './routes/workers.js'
 import { importsRoutes } from './routes/imports.js'
 import { gcalRoutes } from './routes/gcal.js'
+import { aiCorrespondenceRoutes } from './routes/aiCorrespondence.js'
 
 const app = Fastify({ logger: true })
 
@@ -77,6 +78,7 @@ await app.register(queriesRoutes, { prefix: '/api/queries' })
 await app.register(workersRoutes, { prefix: '/api/workers' })
 await app.register(importsRoutes, { prefix: '/api/imports' })
 await app.register(gcalRoutes, { prefix: '/api/gcal' })
+await app.register(aiCorrespondenceRoutes, { prefix: '/api/ai-correspondence' })
 
 // Health check
 app.get('/health', async () => ({ status: 'ok' }))

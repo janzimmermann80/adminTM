@@ -273,6 +273,49 @@ export const sendSms = (body: {
 }) => post<{ success: boolean; sms_id: number }>('/send-sms/send', body)
 
 export const getMailContext = (companyKey: string) => get<any>(`/send-mail/context/${companyKey}`)
+export const AI_CORRESPONDENCE_MODELS = [
+  { id: 'gpt-6-luna', label: 'GPT-6 Luna — úsporný' },
+  { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol — pokročilý' },
+  { id: 'gpt-6-astra', label: 'GPT-6 Astra — nejvýkonnější' },
+] as const
+export type AiCorrespondenceModel = typeof AI_CORRESPONDENCE_MODELS[number]['id']
+
+export const AI_CORRESPONDENCE_DATA_SOURCES = [
+  { id: 'notes', label: 'Posledních 10 poznámek firmy' },
+  { id: 'connection_log', label: 'Posledních 20 přihlášení / záznamů Online' },
+  { id: 'issued_invoices', label: 'Posledních 10 faktur vystavených firmě' },
+  { id: 'new_activity', label: 'Nové zakázky, objednávky a faktury za 7 dní' },
+] as const
+export type AiCorrespondenceDataSource = typeof AI_CORRESPONDENCE_DATA_SOURCES[number]['id']
+export interface AiCorrespondenceType {
+  id: string
+  name: string
+  subject?: string
+  prompt: string
+  dataSources: AiCorrespondenceDataSource[]
+  note_type: string
+}
+
+const AI_MODEL_STORAGE_KEY = 'aiCorrespondenceModel'
+export const getAiCorrespondenceModel = (): AiCorrespondenceModel => {
+  const saved = localStorage.getItem(AI_MODEL_STORAGE_KEY)
+  return AI_CORRESPONDENCE_MODELS.find(model => model.id === saved)?.id ?? AI_CORRESPONDENCE_MODELS[0].id
+}
+export const saveAiCorrespondenceModel = (model: AiCorrespondenceModel) =>
+  localStorage.setItem(AI_MODEL_STORAGE_KEY, model)
+
+export const getAiCorrespondenceTypes = (channel: 'email' | 'sms') =>
+  get<AiCorrespondenceType[]>(`/ai-correspondence/types?channel=${channel}`)
+export const saveAiCorrespondenceTypes = (channel: 'email' | 'sms', types: AiCorrespondenceType[]) =>
+  put<{ success: boolean }>(`/ai-correspondence/types?channel=${channel}`, types)
+
+export const generateCorrespondenceDraft = (body: {
+  company_key: number
+  channel: 'email' | 'sms'
+  recipient: string
+  type_id: string
+  model: AiCorrespondenceModel
+}) => post<{ subject?: string; message: string }>('/ai-correspondence/draft', body)
 export const sendMail = (body: {
   company_key: number; to: string; sender: string
   subject: string; message: string

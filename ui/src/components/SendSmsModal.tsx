@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { getSmsContext, sendSms } from '../api'
 import { Spinner } from './Spinner'
+import { AiCorrespondencePanel } from './AiCorrespondencePanel'
 
 interface Props {
   companyKey: string
@@ -29,12 +30,14 @@ function applyCtx(text: string, ctx: Record<string, string>) {
 }
 
 export const SendSmsModal = ({ companyKey, initialGsm, initialName, onClose }: Props) => {
+  const [tab, setTab] = useState<'templates' | 'ai'>('templates')
   const [recipients, setRecipients] = useState<{ label: string; gsm: string }[]>([
     { label: `${initialName} - ${initialGsm}`, gsm: initialGsm },
   ])
   const [ctx, setCtx] = useState<Record<string, string>>({})
   const [to, setTo] = useState(initialGsm)
   const [text, setText] = useState('')
+  const [generatingDraft, setGeneratingDraft] = useState(false)
   const [sendNow, setSendNow] = useState(true)
   const [noteType, setNoteType] = useState('S')
   const [sending, setSending] = useState(false)
@@ -94,6 +97,16 @@ export const SendSmsModal = ({ companyKey, initialGsm, initialName, onClose }: P
             </svg>
             Odeslat SMS
           </div>
+          <div className="flex gap-1 text-sm">
+            <button onClick={() => setTab('templates')}
+              className={`px-3 py-1 rounded-lg transition-colors ${tab === 'templates' ? 'bg-teal-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+              Šablony
+            </button>
+            <button onClick={() => setTab('ai')}
+              className={`px-3 py-1 rounded-lg transition-colors ${tab === 'ai' ? 'bg-violet-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+              AI
+            </button>
+          </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -119,8 +132,8 @@ export const SendSmsModal = ({ companyKey, initialGsm, initialName, onClose }: P
             )}
           </div>
 
-          {/* Šablony */}
-          <div>
+          {tab === 'templates' ? (
+            <div>
             <label className="block text-xs font-medium text-gray-500 mb-1">Šablona</label>
             <div className="flex flex-wrap gap-1.5">
               {TEMPLATES.map(tpl => (
@@ -130,7 +143,19 @@ export const SendSmsModal = ({ companyKey, initialGsm, initialName, onClose }: P
                 </button>
               ))}
             </div>
-          </div>
+            </div>
+          ) : (
+            <AiCorrespondencePanel
+              companyKey={companyKey}
+              channel="sms"
+              recipient={to}
+              onDraft={(draft, type) => {
+                setText(draft.message)
+                setNoteType(type)
+              }}
+              onGeneratingChange={setGeneratingDraft}
+            />
+          )}
 
           {/* Zpráva */}
           <div>
@@ -167,7 +192,7 @@ export const SendSmsModal = ({ companyKey, initialGsm, initialName, onClose }: P
             className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
             Zrušit
           </button>
-          <button onClick={handleSend} disabled={sending || sent || !text.trim() || !to}
+          <button onClick={handleSend} disabled={sending || generatingDraft || sent || !text.trim() || !to}
             className="flex items-center gap-2 px-4 py-2 text-sm bg-teal-600 text-white rounded-lg hover:bg-teal-700 disabled:opacity-50 transition-colors">
             {sending ? <Spinner size={4} /> : (
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

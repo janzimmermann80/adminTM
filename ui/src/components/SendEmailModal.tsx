@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { getMailContext, sendMail, getEmailTemplates, saveEmailTemplates } from '../api'
+import {
+  getMailContext,
+  sendMail,
+  getEmailTemplates,
+  saveEmailTemplates,
+} from '../api'
 import { Spinner } from './Spinner'
+import { AiCorrespondencePanel } from './AiCorrespondencePanel'
 
 interface Props {
   companyKey: string
@@ -115,9 +121,9 @@ function applyCtx(text: string, ctx: Record<string, string>) {
 }
 
 export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNoteType, onClose }: Props) => {
-  const [tab, setTab] = useState<'send' | 'templates'>('send')
+  const [tab, setTab] = useState<'templates' | 'ai'>('templates')
+  const [manageTemplates, setManageTemplates] = useState(false)
   const [templates, setTemplates] = useState<EmailTemplate[]>(DEFAULT_TEMPLATES)
-  const [templatesLoaded, setTemplatesLoaded] = useState(false)
 
   // Send tab state
   const [recipients, setRecipients] = useState<{ label: string; email: string }[]>(
@@ -134,6 +140,7 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
   const [noteType, setNoteType] = useState(initialNoteType ?? 'S')
   const [activeGroup, setActiveGroup] = useState(GROUPS[0])
   const [signature, setSignature] = useState('')
+  const [generatingDraft, setGeneratingDraft] = useState(false)
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
@@ -164,8 +171,7 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
 
     getEmailTemplates().then(data => {
       if (data?.length) setTemplates(data)
-      setTemplatesLoaded(true)
-    }).catch(() => setTemplatesLoaded(true))
+    }).catch(() => {})
   }, [companyKey])
 
   const handleTemplate = (tpl: EmailTemplate) => {
@@ -179,7 +185,8 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
     setSubject(applyCtx(tpl.subject, fullCtx))
     setMessage(applyCtx(tpl.text, fullCtx))
     setNoteType(tpl.note_type)
-    setTab('send')
+    setTab('templates')
+    setManageTemplates(false)
     setTimeout(() => msgRef.current?.focus(), 50)
   }
 
@@ -209,6 +216,25 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
     setTemplates(ts => ts.map(t => t.id === updated.id ? updated : t))
   }
 
+  const handleCreateTemplate = () => {
+    const newTemplate: EmailTemplate = {
+      id: `custom-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      group: activeGroup,
+      label: 'Nový vzor',
+      subject: '',
+      text: '',
+      note_type: 'S',
+    }
+    setTemplates(ts => [...ts, newTemplate])
+    setEditTpl(newTemplate)
+  }
+
+  const handleDeleteTemplate = () => {
+    if (!editTpl || !window.confirm(`Opravdu chcete smazat vzor „${editTpl.label}“?`)) return
+    setTemplates(ts => ts.filter(t => t.id !== editTpl.id))
+    setEditTpl(null)
+  }
+
   const groupTemplates = templates.filter(t => t.group === activeGroup)
 
   return (
@@ -224,13 +250,13 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
               Odeslat e-mail
             </div>
             <div className="flex gap-1 text-sm">
-              <button onClick={() => setTab('send')}
-                className={`px-3 py-1 rounded-lg transition-colors ${tab === 'send' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-                Odeslat
-              </button>
-              <button onClick={() => setTab('templates')}
+              <button onClick={() => { setTab('templates'); setManageTemplates(false) }}
                 className={`px-3 py-1 rounded-lg transition-colors ${tab === 'templates' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-                Vzory
+                Šablony
+              </button>
+              <button onClick={() => { setTab('ai'); setManageTemplates(false) }}
+                className={`px-3 py-1 rounded-lg transition-colors ${tab === 'ai' ? 'bg-violet-600 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+                AI
               </button>
             </div>
           </div>
@@ -241,12 +267,19 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
           </button>
         </div>
 
-        {/* ── TAB: Odeslat ── */}
-        {tab === 'send' && (
+        {/* ── TAB: Šablony / AI ── */}
+        {(tab === 'templates' || tab === 'ai') && !manageTemplates && (
           <>
             <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
-              {/* Skupiny vzorů */}
-              <div>
+              {tab === 'templates' ? (
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-xs font-medium text-gray-500">Vyberte šablonu</span>
+                    <button onClick={() => { setManageTemplates(true); setEditTpl(null) }}
+                      className="px-3 py-1.5 text-xs font-medium text-blue-700 border border-blue-200 rounded-lg bg-blue-50 hover:bg-blue-100">
+                      Upravit / přidat šablony
+                    </button>
+                  </div>
                 <div className="flex gap-1 flex-wrap mb-2">
                   {GROUPS.map(g => (
                     <button key={g} onClick={() => setActiveGroup(g)}
@@ -263,7 +296,20 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
                     </button>
                   ))}
                 </div>
-              </div>
+                </div>
+              ) : (
+                <AiCorrespondencePanel
+                  companyKey={companyKey}
+                  channel="email"
+                  recipient={to}
+                  onDraft={(draft, type) => {
+                    setSubject(draft.subject ?? '')
+                    setMessage(draft.message)
+                    setNoteType(type)
+                  }}
+                  onGeneratingChange={setGeneratingDraft}
+                />
+              )}
 
               {/* Příjemce */}
               <div>
@@ -329,7 +375,7 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
 
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-gray-100 shrink-0">
               <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Zrušit</button>
-              <button onClick={handleSend} disabled={sending || sent || !to || !subject.trim() || !message.trim()}
+              <button onClick={handleSend} disabled={sending || generatingDraft || sent || !to || !subject.trim() || !message.trim()}
                 className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
                 {sending ? <Spinner size={4}/> : (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -343,11 +389,17 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
         )}
 
         {/* ── TAB: Vzory ── */}
-        {tab === 'templates' && (
+        {tab === 'templates' && manageTemplates && (
           <>
             <div className="flex flex-1 overflow-hidden">
               {/* Seznam vzorů */}
               <div className="w-56 border-r border-gray-200 overflow-y-auto shrink-0">
+                <button
+                  onClick={handleCreateTemplate}
+                  className="w-full px-3 py-2 text-left text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border-b border-blue-100"
+                >
+                  + Přidat nový vzor
+                </button>
                 {GROUPS.map(g => {
                   const gTpls = templates.filter(t => t.group === g)
                   return (
@@ -398,6 +450,12 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-blue-500 resize-y font-mono"
                         value={editTpl.text} onChange={e => handleEditField('text', e.target.value)} />
                     </div>
+                    <button
+                      onClick={handleDeleteTemplate}
+                      className="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50"
+                    >
+                      Smazat tento vzor
+                    </button>
                   </>
                 ) : (
                   <div className="text-sm text-gray-400 text-center pt-16">Vyberte vzor ze seznamu</div>
@@ -408,7 +466,7 @@ export const SendEmailModal = ({ companyKey, initialEmail, initialCtx, initialNo
             <div className="flex justify-between items-center px-5 py-3 border-t border-gray-100 shrink-0">
               <span className="text-xs text-gray-400">{templates.length} vzorů</span>
               <div className="flex gap-2">
-                <button onClick={onClose} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Zavřít</button>
+                <button onClick={() => setManageTemplates(false)} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Zpět k šablonám</button>
                 <button onClick={handleSaveTemplates} disabled={savingTpls}
                   className="flex items-center gap-2 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
                   {savingTpls ? <Spinner size={4}/> : (
