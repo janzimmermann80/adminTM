@@ -11,6 +11,7 @@ import { TabInvoices } from './TabInvoices'
 import { TabVehicles } from './TabVehicles'
 import { TabNotes } from './TabNotes'
 import { TabOnline } from './TabOnline'
+import { TabLetter } from './TabLetter'
 
 const SplitBadge = ({ label, a, aLabel, b, bLabel }: {
   label: string; a: number; aLabel: string; b: number; bLabel?: string
@@ -32,6 +33,7 @@ const TABS = [
   { key: 'vehicles', label: 'TruckManager' },
   { key: 'notes',    label: 'Poznámky' },
   { key: 'online',   label: 'Online' },
+  { key: 'letter',   label: 'Dopis' },
 ]
 
 interface Props {
@@ -411,6 +413,7 @@ export const CompanyDetailPanel = ({ companyKey, initialTab = 'info', onClose, u
           {tab === 'vehicles' && <TabVehicles companyKey={companyKey} />}
           {tab === 'notes'    && <TabNotes    companyKey={companyKey} />}
           {tab === 'online'   && <TabOnline   companyKey={companyKey} />}
+          {tab === 'letter'   && <TabLetter key={companyKey} companyKey={companyKey} />}
         </div>
       </div>
     </div>

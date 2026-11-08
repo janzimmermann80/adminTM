@@ -1,17 +1,18 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { getUserSql } from '../db/userSql.js'
 
-// Doplní chybějící měsíce tak, aby výsledek pokrýval posledních 36 měsíců
+// Doplní chybějící měsíce za zvolené období (výchozí 36 měsíců).
 // (od nejstaršího po nejnovější). Řádky z DB se mapují podle klíče 'YYYY-MM'.
-function fill36Months<T extends Record<string, any>>(
+function fillMonths<T extends Record<string, any>>(
   rows: T[],
   extra: (month: string) => T,
+  months = 36,
 ): T[] {
   const byMonth = new Map<string, T>()
   for (const r of rows) byMonth.set(r.month, r)
   const now = new Date()
   const result: T[] = []
-  for (let i = 35; i >= 0; i--) {
+  for (let i = months - 1; i >= 0; i--) {
     const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))
     const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
     result.push(byMonth.get(month) ?? extra(month))
@@ -314,7 +315,7 @@ export async function statisticsRoutes(app: FastifyInstance) {
     }
   })
 
-  // GET /api/statistics/lent-monthly — registrace (zapůjčení programu) per měsíc, 36 měsíců
+  // GET /api/statistics/lent-monthly — registrace (zapůjčení programu) per měsíc, 90 měsíců
   app.get('/lent-monthly', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
@@ -330,14 +331,15 @@ export async function statisticsRoutes(app: FastifyInstance) {
                count(*) FILTER (WHERE D.admittance_date >= CURRENT_DATE AND C.tariff = '15')::int AS active_trial
         FROM provider.company_detail AS D
         JOIN provider.company AS C ON C.company_key = D.company_key
-        WHERE D.prog_lent_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+        WHERE D.prog_lent_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '89 months'
           AND D.prog_lent_date <= CURRENT_DATE
         GROUP BY 1
         ORDER BY 1
       `
-      const result = fill36Months(
+      const result = fillMonths(
         rows.map((r: any) => ({ month: r.month, count: r.count, active: r.active, active_trial: r.active_trial })),
         (month) => ({ month, count: 0, active: 0, active_trial: 0 }),
+        90,
       )
       return reply.send(result)
     } finally {
@@ -345,9 +347,9 @@ export async function statisticsRoutes(app: FastifyInstance) {
     }
   })
 
-  // GET /api/statistics/lent-companies — seznam registrovaných firem (36 měsíců) s příznakem aktivního přístupu
+  // GET /api/statistics/lent-companies — seznam registrovaných firem (90 měsíců) s příznakem aktivního přístupu
   // ?status=active|inactive (výchozí = všechny), ?month=YYYY-MM (omezí na měsíc registrace),
-  // ?trial=true (jen aktivní s tarifem Zkušební 15) / ?trial=false (aktivní ostatní)
+  // Včetně prezentace a aktivity od registrace; ?trial=true (tarif Zkušební 15) / ?trial=false (ostatní)
   app.get('/lent-companies', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
@@ -368,14 +370,48 @@ export async function statisticsRoutes(app: FastifyInstance) {
         : q.trial === 'false'
           ? sql`AND C.tariff IS DISTINCT FROM '15'`
           : sql``
+      const activityJoins = sql`
+          LEFT JOIN LATERAL (
+            SELECT count(*) FILTER (WHERE action = 'LI')::int AS login_count,
+                   count(DISTINCT time::date)::int AS active_days,
+                   to_char(max(time) FILTER (WHERE action = 'LI'), 'YYYY-MM-DD HH24:MI:SS') AS last_login
+            FROM provider.log_internet
+            WHERE company_key = C.company_key
+              AND time >= D.prog_lent_date
+              AND time <= LOCALTIMESTAMP
+          ) AS L ON true
+          LEFT JOIN LATERAL (
+            SELECT count(*)::int AS obligation_count
+            FROM ta.obligation_base
+            WHERE company_key = C.company_key
+              AND created_time >= D.prog_lent_date
+              AND created_time <= CURRENT_TIMESTAMP
+          ) AS O ON true
+          LEFT JOIN LATERAL (
+            SELECT count(*)::int AS order_count
+            FROM ta.order_base
+            WHERE company_key = C.company_key
+              AND created_time >= D.prog_lent_date
+              AND created_time <= CURRENT_TIMESTAMP
+          ) AS R ON true
+          LEFT JOIN LATERAL (
+            SELECT count(*) FILTER (WHERE one_time IS FALSE)::int AS scheduled_report_count,
+                   count(*)::int AS total_scheduled_report_count
+            FROM provider.reports_schedule
+            WHERE company_key = C.company_key
+          ) AS S ON true
+        `
       const rows = await sql`
         SELECT C.company_key, C.id, C.company, C.city, C.country, C.tariff,
                to_char(D.prog_lent_date, 'YYYY-MM') AS month,
                D.prog_lent_date, D.admittance_date,
-               (D.admittance_date >= CURRENT_DATE) AS active
+               (D.admittance_date >= CURRENT_DATE) AS active,
+               D.show_date, L.login_count, L.active_days, L.last_login,
+               O.obligation_count, R.order_count, S.scheduled_report_count, S.total_scheduled_report_count
         FROM provider.company_detail AS D
         JOIN provider.company AS C ON C.company_key = D.company_key
-        WHERE D.prog_lent_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+        ${activityJoins}
+        WHERE D.prog_lent_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '89 months'
           AND D.prog_lent_date <= CURRENT_DATE
           ${monthFilter}
           ${statusFilter}
@@ -418,7 +454,7 @@ export async function statisticsRoutes(app: FastifyInstance) {
     }
   })
 
-  // GET /api/statistics/show-monthly — prezentace (show_date) per měsíc, 36 měsíců
+  // GET /api/statistics/show-monthly — prezentace (show_date) per měsíc, 90 měsíců
   app.get('/show-monthly', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
@@ -430,14 +466,15 @@ export async function statisticsRoutes(app: FastifyInstance) {
                count(*)::int AS count,
                count(*) FILTER (WHERE D.admittance_date >= CURRENT_DATE)::int AS active
         FROM provider.company_detail AS D
-        WHERE D.show_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+        WHERE D.show_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '89 months'
           AND D.show_date <= CURRENT_DATE
         GROUP BY 1
         ORDER BY 1
       `
-      const result = fill36Months(
+      const result = fillMonths(
         rows.map((r: any) => ({ month: r.month, count: r.count, active: r.active })),
         (month) => ({ month, count: 0, active: 0 }),
+        90,
       )
       return reply.send(result)
     } finally {
@@ -445,7 +482,7 @@ export async function statisticsRoutes(app: FastifyInstance) {
     }
   })
 
-  // GET /api/statistics/show-companies — seznam firem s prezentací (36 měsíců), ?month=YYYY-MM, ?status=active|inactive
+  // GET /api/statistics/show-companies — seznam firem s prezentací (90 měsíců), ?month=YYYY-MM, ?status=active|inactive
   app.get('/show-companies', {
     onRequest: [(app as any).authenticate],
   }, async (request: FastifyRequest, reply: FastifyReply) => {
@@ -468,7 +505,7 @@ export async function statisticsRoutes(app: FastifyInstance) {
                (D.admittance_date >= CURRENT_DATE) AS active
         FROM provider.company_detail AS D
         JOIN provider.company AS C ON C.company_key = D.company_key
-        WHERE D.show_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '35 months'
+        WHERE D.show_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '89 months'
           AND D.show_date <= CURRENT_DATE
           ${monthFilter}
           ${statusFilter}
@@ -497,7 +534,7 @@ export async function statisticsRoutes(app: FastifyInstance) {
         GROUP BY 1
         ORDER BY 1
       `
-      const result = fill36Months(
+      const result = fillMonths(
         rows.map((r: any) => ({ month: r.month, count: r.count, digital: r.digital })),
         (month) => ({ month, count: 0, digital: 0 }),
       )
@@ -524,7 +561,7 @@ export async function statisticsRoutes(app: FastifyInstance) {
         GROUP BY 1
         ORDER BY 1
       `
-      const result = fill36Months(
+      const result = fillMonths(
         rows.map((r: any) => ({ month: r.month, count: r.count, accepted: r.accepted })),
         (month) => ({ month, count: 0, accepted: 0 }),
       )
@@ -555,7 +592,7 @@ export async function statisticsRoutes(app: FastifyInstance) {
         GROUP BY 1
         ORDER BY 1
       `
-      const result = fill36Months(
+      const result = fillMonths(
         rows.map((r: any) => ({ month: r.month, issued_cz: r.issued_cz, issued_sk: r.issued_sk, received: r.received })),
         (month) => ({ month, issued_cz: 0, issued_sk: 0, received: 0 }),
       )

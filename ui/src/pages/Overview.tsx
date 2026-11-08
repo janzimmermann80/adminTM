@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/Spinner'
@@ -14,6 +14,8 @@ import {
   getStatsExpiredAccess,
   getStatsOverdueCompanies,
   getStatsLentCompanies,
+  deleteCompanyReports,
+  type LentCompany,
   getStatsShowMonthly,
   getStatsShowCompanies,
 } from '../api'
@@ -51,7 +53,7 @@ const Tile = ({
   )
 }
 
-// ── Lent monthly chart (36 months) + Prezentace vedle ────────────────────────
+// ── Lent monthly chart (90 months) + Prezentace vedle ────────────────────────
 
 const LentChart = ({ data, showData, onSelect, selected, onShowSelect, showSelected }: {
   data: { month: string; count: number; active: number; active_trial: number }[]
@@ -68,11 +70,12 @@ const LentChart = ({ data, showData, onSelect, selected, onShowSelect, showSelec
   const chartH = 120
   const labelH = 28
   const valH   = 14
+  const chartBottom = valH + chartH
   const totalH = chartH + labelH + valH + 6
   const gap    = 3   // mezera mezi měsíci
   const pairGap = 2  // mezera mezi sloupcem registrace a prezentace
   const n      = data.length
-  const W      = 1200
+  const W      = Math.max(1200, Math.ceil(n * 1200 / 36))
   // šířka dvojice (registrace + prezentace) na měsíc
   const groupW = Math.floor((W - (n - 1) * gap) / n)
   const barW   = Math.max(1, Math.floor((groupW - pairGap) / 2))
@@ -81,7 +84,7 @@ const LentChart = ({ data, showData, onSelect, selected, onShowSelect, showSelec
 
   return (
     <div className="overflow-x-auto">
-      <svg viewBox={`0 0 ${W} ${totalH}`} style={{ minWidth: 700, width: '100%', height: totalH }}>
+      <svg viewBox={`0 0 ${W} ${totalH}`} style={{ minWidth: Math.ceil(n * 700 / 36), width: '100%', height: totalH }}>
         {data.map((d, i) => {
           const sh = showByMonth.get(d.month)
           const sCount = sh?.count ?? 0
@@ -94,9 +97,9 @@ const LentChart = ({ data, showData, onSelect, selected, onShowSelect, showSelec
           const sActH = sCount > 0 ? (sActive / sCount) * sBarH : 0
           const sInactH = sBarH - sActH
           const x    = i * (groupW + gap)
-          const y    = chartH - barH
+          const y    = chartBottom - barH
           const sX   = x + barW + pairGap
-          const sY   = chartH - sBarH
+          const sY   = chartBottom - sBarH
           const [yr, mo] = d.month.split('-')
           const isJan = mo === '01'
           const isShowSel = (st?: string) => showSelected?.month === d.month && showSelected?.status === st
@@ -158,12 +161,12 @@ const LentChart = ({ data, showData, onSelect, selected, onShowSelect, showSelec
                 </text>
               )}
               {/* month label — uprostřed dvojice */}
-              <text x={x + (barW * 2 + pairGap) / 2} y={chartH + valH + 2} textAnchor="middle" fontSize={8} fill="#9ca3af">
+              <text x={x + (barW * 2 + pairGap) / 2} y={chartBottom + 16} textAnchor="middle" fontSize={8} fill="#9ca3af">
                 {mo}
               </text>
               {/* year label — only on January */}
               {isJan && (
-                <text x={x + (barW * 2 + pairGap) / 2} y={chartH + valH + 14} textAnchor="middle" fontSize={9}
+                <text x={x + (barW * 2 + pairGap) / 2} y={chartBottom + 28} textAnchor="middle" fontSize={9}
                   fontWeight="600" fill="#4b5563">
                   {yr}
                 </text>
@@ -282,8 +285,12 @@ export const Overview = () => {
   const [regionLoading, setRegionLoading]       = useState(false)
   const [lentStatus, setLentStatus]             = useState<'active' | 'trial' | 'paid' | 'inactive' | null>(null)
   const [lentMonth, setLentMonth]               = useState<string | null>(null)
-  const [lentList, setLentList]                 = useState<any[] | null>(null)
+  const [lentList, setLentList]                 = useState<LentCompany[] | null>(null)
   const [lentLoading, setLentLoading]           = useState(false)
+  const [lentError, setLentError]               = useState('')
+  const lentRequest = useRef(0)
+  const [deletingReports, setDeletingReports] = useState<string | null>(null)
+  const [reportDeleteError, setReportDeleteError] = useState('')
   const [show, setShow]                         = useState<any[]>([])
   const [showMonth, setShowMonth]               = useState<string | null>(null)
   const [showStatus, setShowStatus]             = useState<'active' | 'inactive' | null>(null)
@@ -344,13 +351,36 @@ export const Overview = () => {
     setShowExpired(v => !v)
   }
 
+  const handleDeleteReports = async (company: LentCompany) => {
+    if (deletingReports || !confirm(`Smazat všechny záznamy Reports Schedule firmy ${company.company} (${company.total_scheduled_report_count})? Včetně jednorázových reportů a záznamů s prázdnou hodnotou one_time. Tuto akci nelze vrátit zpět.`)) return
+    const request = lentRequest.current
+    setDeletingReports(String(company.company_key))
+    setReportDeleteError('')
+    try {
+      await deleteCompanyReports(String(company.company_key))
+      const rows = await getStatsLentCompanies({
+        status: lentStatus === 'inactive' ? 'inactive' : 'active',
+        month: lentMonth ?? undefined,
+        trial: lentStatus === 'trial' ? true : lentStatus === 'paid' ? false : undefined,
+      })
+      if (request === lentRequest.current) setLentList(rows)
+    } catch (e: unknown) {
+      setReportDeleteError(e instanceof Error ? e.message : 'Chyba při mazání reportů firmy')
+    } finally {
+      setDeletingReports(null)
+    }
+  }
+
   const handleLentToggle = (status: 'active' | 'trial' | 'paid' | 'inactive', month?: string) => {
     const m = month ?? null
     // klik na stejnou kombinaci = zavřít
+    const request = ++lentRequest.current
     if (lentStatus === status && lentMonth === m) { setLentStatus(null); setLentMonth(null); return }
     setLentStatus(status)
     setLentMonth(m)
     setLentLoading(true)
+    setLentError('')
+    setLentList(null)
     // trial/paid = podmnožina aktivních; active/inactive bez trial filtru
     const params: { status?: 'active' | 'inactive'; month?: string; trial?: boolean } = { month: m ?? undefined }
     if (status === 'trial')      { params.status = 'active'; params.trial = true }
@@ -358,9 +388,13 @@ export const Overview = () => {
     else if (status === 'active')   params.status = 'active'
     else                            params.status = 'inactive'
     getStatsLentCompanies(params)
-      .then(setLentList)
-      .catch(() => setLentList([]))
-      .finally(() => setLentLoading(false))
+      .then(rows => { if (request === lentRequest.current) setLentList(rows) })
+      .catch((e: unknown) => {
+        if (request === lentRequest.current) {
+          setLentError(e instanceof Error ? e.message : 'Chyba při načítání registrovaných firem')
+        }
+      })
+      .finally(() => { if (request === lentRequest.current) setLentLoading(false) })
   }
 
   // klik na sloupec grafu — přepne status a nastaví měsíc
@@ -636,7 +670,7 @@ export const Overview = () => {
       {/* Lent monthly chart */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 mb-5">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm font-semibold text-gray-700">Registrace za posledních 36 měsíců</h2>
+          <h2 className="text-sm font-semibold text-gray-700">Registrace za posledních 90 měsíců</h2>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3 text-xs text-gray-500">
               <button
@@ -719,10 +753,19 @@ export const Overview = () => {
                 {lentMonth && <span className="ml-1 font-normal text-[#0a6b6b]">· {lentMonth.split('-')[1]}.{lentMonth.split('-')[0]}</span>}
                 <span className="ml-2 font-normal text-gray-400">{lentList?.length ?? 0} firem</span>
               </span>
-              <button onClick={() => { setLentStatus(null); setLentMonth(null) }} className="text-xs text-gray-400 hover:text-gray-600">Zavřít</button>
+              <button onClick={() => { lentRequest.current++; setLentStatus(null); setLentMonth(null) }} className="text-xs text-gray-400 hover:text-gray-600">Zavřít</button>
             </div>
+            <p className="text-xs text-gray-400 mb-3">
+              Aktivita od registrace podle dostupných dat. Připojení = záznamy přihlášení (LI),
+              aktivní dny = dny s libovolnou online akcí. Smazaná historie se nezapočítává.
+              {' '}Pravidelné reporty = všechny uložené záznamy Reports Schedule s one_time = false, bez omezení datem registrace.
+              {' '}Koš po potvrzení smaže všechny záznamy Reports Schedule firmy, včetně jednorázových a prázdných hodnot one_time.
+            </p>
+            {reportDeleteError && <div role="alert" className="text-sm text-red-600 py-3">{reportDeleteError}</div>}
             {lentLoading ? (
               <div className="flex justify-center py-6"><Spinner size={8} /></div>
+            ) : lentError ? (
+              <div role="alert" className="text-sm text-red-600 py-3">{lentError}</div>
             ) : (
               <div className="overflow-x-auto max-h-96 overflow-y-auto">
                 <table className="w-full text-sm">
@@ -733,14 +776,21 @@ export const Overview = () => {
                       <th className="px-4 py-2 font-medium hidden md:table-cell">Město</th>
                       <th className="px-4 py-2 font-medium hidden lg:table-cell">Stát</th>
                       <th className="px-4 py-2 font-medium hidden md:table-cell">Registrace</th>
+                      <th className="px-4 py-2 font-medium whitespace-nowrap">Prezentace</th>
                       <th className="px-4 py-2 font-medium hidden lg:table-cell">Přístup do</th>
+                      <th className="px-4 py-2 font-medium text-right">Připojení</th>
+                      <th className="px-4 py-2 font-medium text-right whitespace-nowrap">Aktivní dny</th>
+                      <th className="px-4 py-2 font-medium whitespace-nowrap">Naposledy</th>
+                      <th className="px-4 py-2 font-medium text-right">Zakázky</th>
+                      <th className="px-4 py-2 font-medium text-right whitespace-nowrap">Reporty</th>
+                      <th className="px-4 py-2 font-medium text-right">Objednávky</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {(lentList ?? []).map((c: any) => (
+                    {(lentList ?? []).map(c => (
                       <tr
                         key={c.company_key}
-                        onClick={() => { setModalTab('info'); setModalKey(c.company_key) }}
+                        onClick={() => { setModalTab('info'); setModalKey(String(c.company_key)) }}
                         className="hover:bg-teal-50 cursor-pointer transition-colors"
                       >
                         <td className="px-4 py-2 text-gray-400 font-mono text-xs">{c.id}</td>
@@ -752,13 +802,42 @@ export const Overview = () => {
                         <td className="px-4 py-2 text-gray-600 hidden md:table-cell text-xs">{c.city}</td>
                         <td className="px-4 py-2 hidden lg:table-cell text-xs text-gray-500">{c.country}</td>
                         <td className="px-4 py-2 hidden md:table-cell text-xs text-gray-500">{formatDate(c.prog_lent_date)}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-xs text-indigo-700">{c.show_date ? formatDate(c.show_date) : '—'}</td>
                         <td className={`px-4 py-2 hidden lg:table-cell text-xs font-medium ${c.active ? 'text-[#0a6b6b]' : 'text-gray-400'}`}>
                           {c.admittance_date ? formatDate(c.admittance_date) : '—'}
                         </td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs">{c.login_count.toLocaleString('cs-CZ')}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs">{c.active_days.toLocaleString('cs-CZ')}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-xs text-gray-500">
+                          {c.last_login ? formatDate(c.last_login) : '—'}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs">{c.obligation_count.toLocaleString('cs-CZ')}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs">
+                          <div className="flex items-center justify-end gap-2">
+                            <span>{c.scheduled_report_count.toLocaleString('cs-CZ')}</span>
+                            {c.total_scheduled_report_count > 0 && (
+                              <button
+                                type="button"
+                                title="Smazat všechny reporty firmy"
+                                aria-label={`Smazat všechny reporty firmy ${c.company}`}
+                                disabled={deletingReports !== null}
+                                onClick={e => { e.stopPropagation(); void handleDeleteReports(c) }}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors disabled:opacity-40"
+                              >
+                                {deletingReports === String(c.company_key) ? <Spinner size={4} /> : (
+                                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                  </svg>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs">{c.order_count.toLocaleString('cs-CZ')}</td>
                       </tr>
                     ))}
                     {(lentList ?? []).length === 0 && (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Žádné firmy</td></tr>
+                      <tr><td colSpan={13} className="px-4 py-8 text-center text-gray-400">Žádné firmy</td></tr>
                     )}
                   </tbody>
                 </table>

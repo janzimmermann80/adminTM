@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dopis | TruckManager</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root { --address-left: 100mm; --address-top: 39.5mm; }
+    body { margin: 0; background: #edf1f3; color: #23343d; font-family: Arial, sans-serif; }
+    .page { position: relative; width: 210mm; min-height: 297mm; margin: 0 auto 24px; padding: 100mm 20mm 15mm; background: white; box-shadow: 0 4px 24px #0002; display: flex; flex-direction: column; }
+    .header { position: absolute; top: 10mm; left: 20mm; right: 20mm; display: flex; align-items: center; justify-content: space-between; gap: 10mm; padding-bottom: 5mm; border-bottom: 0.5mm solid #0a6b6b; }
+    .header img { width: 62mm; max-height: 18mm; object-fit: contain; object-position: left center; }
+    .print-logo { border: 0; padding: 0; background: none; cursor: pointer; }
+    .sender { text-align: right; font-size: 9pt; line-height: 1.5; }
+    .recipient { position: absolute; left: var(--address-left); top: var(--address-top); width: 100mm; height: 40mm; padding: 5mm; color: #111; font-size: 11pt; line-height: 1.45; }
+    .recipient [contenteditable] { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .meta { text-align: right; margin-bottom: 8mm; font-size: 10pt; }
+    .letter { font-size: 11pt; line-height: 1.6; overflow-wrap: anywhere; }
+    .letter h2 { font-size: 16pt; color: #0a6b6b; line-height: 1.3; margin: 0 0 8mm; }
+    .letter p { margin: 0 0 5mm; }
+    .signature { margin-top: 8mm; }
+    .artwork { margin-top: 8mm; }
+    .artwork img { display: block; max-width: 100%; max-height: 60mm; object-fit: contain; margin: auto; }
+    [hidden] { display: none !important; }
+    .footer { margin-top: auto; padding-top: 12mm; font-size: 8pt; line-height: 1.5; color: #667780; }
+    .footer > div { border-top: 0.3mm solid #bac9cd; padding-top: 4mm; }
+    [contenteditable]:focus { outline: 1px solid #0a6b6b; outline-offset: 3px; }
+    @page { size: A4; margin: 0; }
+    @media print {
+      body { background: white; }
+      .page { margin: 0; box-shadow: none; }
+      [contenteditable]:focus { outline: none; }
+      .header, .letter h2 { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+      .letter p, .signature, .artwork, .footer { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <button class="print-logo" type="button" onclick="window.print()" title="Vytisknout / uložit PDF" aria-label="Vytisknout / uložit PDF">
+        <img src="truckmanager-logo.svg" alt="TruckManager">
+      </button>
+      <div class="sender" contenteditable="true" aria-label="Odesílatel">
+        <strong>[Název odesílatele]</strong><br>
+        [Ulice a číslo]<br>
+        [PSČ a město]
+      </div>
+    </header>
+    <section class="recipient" aria-label="Adresní plocha pro okénko DL obálky">
+      <div contenteditable="true" aria-label="Adresa příjemce">[Název firmy příjemce]<br>[Jméno / oddělení]<br>[Ulice a číslo]<br>[PSČ a město]<br>[Stát, pokud je potřeba]</div>
+    </section>
+    <div class="meta" contenteditable="true" aria-label="Místo a datum">[Místo], [datum]</div>
+    <article class="letter" contenteditable="true" aria-label="Text dopisu">
+      <h2>[Předmět dopisu]</h2>
+      <p>Vážená paní, vážený pane,</p>
+      <p>[Zde bude osobní úvod dopisu pro konkrétní firmu.]</p>
+      <p>[Zde bude hlavní text, nabídka a vysvětlení přínosů služby TruckManager. Text bude možné později doplnit z AI generátoru.]</p>
+      <p>[Zde bude návrh dalšího kroku a kontakt pro odpověď.]</p>
+      <div class="signature">S pozdravem<br><strong>[Jméno a příjmení]</strong><br>[Funkce / firma]<br>[Telefon a e-mail]</div>
+    </article>
+    <figure class="artwork" hidden><img id="artwork" alt="Grafika dopisu"></figure>
+    <footer class="footer">
+      <div contenteditable="true" aria-label="Kontaktní a firemní údaje v patičce">[Název firmy] · [Web] · [E-mail] · [Telefon]<br>[IČO / DIČ a další údaje dle potřeby]</div>
+    </footer>
+  </main>
+</body>
+</html>

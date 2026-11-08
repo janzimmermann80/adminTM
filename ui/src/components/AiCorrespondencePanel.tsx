@@ -15,7 +15,7 @@ import { Spinner } from './Spinner'
 
 interface Props {
   companyKey: string
-  channel: 'email' | 'sms'
+  channel: 'email' | 'sms' | 'letter'
   recipient: string
   onDraft: (draft: { subject?: string; message: string }, noteType: string) => void
   onGeneratingChange: (generating: boolean) => void
@@ -178,9 +178,9 @@ export const AiCorrespondencePanel = ({ companyKey, channel, recipient, onDraft,
                   className="w-full border border-violet-200 rounded-lg px-3 py-2 text-sm bg-white"
                 />
               </div>
-              {channel === 'email' && (
+              {channel !== 'sms' && (
                 <div>
-                  <label className="block text-xs font-medium text-violet-800 mb-1">Předmět e-mailu (volitelné)</label>
+                  <label className="block text-xs font-medium text-violet-800 mb-1">{channel === 'letter' ? 'Předmět dopisu (volitelné)' : 'Předmět e-mailu (volitelné)'}</label>
                   <input
                     maxLength={200}
                     value={editingType.subject ?? ''}
@@ -276,7 +276,7 @@ export const AiCorrespondencePanel = ({ companyKey, channel, recipient, onDraft,
       )}
 
       {error && <p role="alert" className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
-      {!manage && <p className="text-xs text-violet-700">Použije se uložený pokyn a vybraná data. Návrh před odesláním zkontrolujte.</p>}
+      {!manage && <p className="text-xs text-violet-700">Použije se uložený pokyn a vybraná data. {channel === 'letter' ? 'Dopis navíc zohlední registraci a aktivitu firmy. Návrh před tiskem zkontrolujte.' : 'Návrh před odesláním zkontrolujte.'}</p>}
     </div>
   )
 }

@@ -85,6 +85,36 @@ async function orsrLookup(cin: string): Promise<OrsrResult> {
 }
 
 export async function queriesRoutes(app: FastifyInstance) {
+  // Deletes all scheduled reports belonging to the company.
+  app.delete<{ Params: { companyKey: string } }>('/reports-schedule/:companyKey', {
+    onRequest: [(app as any).authenticate],
+    schema: {
+      params: {
+        type: 'object',
+        required: ['companyKey'],
+        properties: { companyKey: { type: 'string', pattern: '^[1-9][0-9]{0,18}$' } },
+      },
+    },
+  }, async (request, reply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const { companyKey } = request.params
+    if (BigInt(companyKey) > 9223372036854775807n) {
+      return reply.code(400).send({ error: 'Neplatný klíč firmy' })
+    }
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const [company] = await sql`SELECT company_key FROM provider.company WHERE company_key = ${companyKey}`
+      if (!company) return reply.code(404).send({ error: 'Firma nenalezena' })
+      const deleted = await sql`
+        DELETE FROM provider.reports_schedule
+        WHERE company_key = ${companyKey}
+      `
+      return reply.send({ success: true, deleted_count: deleted.count })
+    } finally {
+      await sql.end()
+    }
+  })
+
   // GET /api/queries/reports-schedule
   app.get('/reports-schedule', {
     onRequest: [(app as any).authenticate],

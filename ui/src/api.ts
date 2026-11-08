@@ -101,12 +101,35 @@ export const getStatsShowCompanies = (month?: string, status?: 'active' | 'inact
   if (status) p.set('status', status)
   return get<any[]>(`/statistics/show-companies${p.toString() ? `?${p}` : ''}`)
 }
+export interface LentCompany {
+  company_key: string | number
+  id: string | null
+  company: string
+  city: string | null
+  country: string | null
+  tariff: string | null
+  month: string
+  prog_lent_date: string
+  admittance_date: string | null
+  active: boolean | null
+  show_date: string | null
+  login_count: number
+  active_days: number
+  last_login: string | null
+  obligation_count: number
+  order_count: number
+  scheduled_report_count: number
+  total_scheduled_report_count: number
+}
+export const deleteCompanyReports = (companyKey: string) =>
+  del<{ success: true; deleted_count: number }>(`/queries/reports-schedule/${encodeURIComponent(companyKey)}`)
+
 export const getStatsLentCompanies = (params: { status?: 'active' | 'inactive'; month?: string; trial?: boolean } = {}) => {
   const p = new URLSearchParams()
   if (params.status)            p.set('status', params.status)
   if (params.month)             p.set('month', params.month)
   if (params.trial !== undefined) p.set('trial', String(params.trial))
-  return get<any[]>(`/statistics/lent-companies?${p}`)
+  return get<LentCompany[]>(`/statistics/lent-companies?${p}`)
 }
 export const getStatsOrderBaseMonthly   = () => get<any[]>('/statistics/order-base-monthly')
 export const getStatsInvoiceBaseMonthly = () => get<any[]>('/statistics/invoice-base-monthly')
@@ -272,7 +295,8 @@ export const sendSms = (body: {
   send_immediately: boolean; note_type: string; note_text: string
 }) => post<{ success: boolean; sms_id: number }>('/send-sms/send', body)
 
-export const getMailContext = (companyKey: string) => get<any>(`/send-mail/context/${companyKey}`)
+export const getMailContext = (companyKey: string) =>
+  get<{ context: Record<string, string>; recipients: { label: string; email: string }[]; senders: Record<string, { name: string; email: string }> }>(`/send-mail/context/${companyKey}`)
 export const AI_CORRESPONDENCE_MODELS = [
   { id: 'gpt-6-luna', label: 'GPT-6 Luna — úsporný' },
   { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol — pokročilý' },
@@ -304,14 +328,14 @@ export const getAiCorrespondenceModel = (): AiCorrespondenceModel => {
 export const saveAiCorrespondenceModel = (model: AiCorrespondenceModel) =>
   localStorage.setItem(AI_MODEL_STORAGE_KEY, model)
 
-export const getAiCorrespondenceTypes = (channel: 'email' | 'sms') =>
+export const getAiCorrespondenceTypes = (channel: 'email' | 'sms' | 'letter') =>
   get<AiCorrespondenceType[]>(`/ai-correspondence/types?channel=${channel}`)
-export const saveAiCorrespondenceTypes = (channel: 'email' | 'sms', types: AiCorrespondenceType[]) =>
+export const saveAiCorrespondenceTypes = (channel: 'email' | 'sms' | 'letter', types: AiCorrespondenceType[]) =>
   put<{ success: boolean }>(`/ai-correspondence/types?channel=${channel}`, types)
 
 export const generateCorrespondenceDraft = (body: {
   company_key: number
-  channel: 'email' | 'sms'
+  channel: 'email' | 'sms' | 'letter'
   recipient: string
   type_id: string
   model: AiCorrespondenceModel
