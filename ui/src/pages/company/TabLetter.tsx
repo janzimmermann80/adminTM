@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { getMailContext } from '../../api'
+import { getLetterImages, getMailContext, type LetterImage, type LetterIllustration } from '../../api'
 import { AiCorrespondencePanel } from '../../components/AiCorrespondencePanel'
 import { Spinner } from '../../components/Spinner'
+import { composeLetter, validateLetterPagination } from './letterDocument'
 
 interface Props { companyKey: string }
 
@@ -17,15 +18,19 @@ export const TabLetter = ({ companyKey }: Props) => {
   const [html, setHtml] = useState('')
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [preparing, setPreparing] = useState(false)
+  const [library, setLibrary] = useState<LetterImage[]>([])
+  const [illustrations, setIllustrations] = useState<LetterIllustration[]>([])
   const [error, setError] = useState('')
 
   useEffect(() => {
     let active = true
     const load = async () => {
-      const [data, templateResponse, logoResponse] = await Promise.all([
+      const [data, templateResponse, logoResponse, images] = await Promise.all([
         getMailContext(companyKey),
         fetch(`${import.meta.env.BASE_URL}letterhead.html`),
         fetch(`${import.meta.env.BASE_URL}truckmanager-logo.svg`),
+        getLetterImages(),
       ])
       if (!templateResponse.ok || !logoResponse.ok) throw new Error('Šablonu dopisu nebo logo se nepodařilo načíst.')
       const [source, logo] = await Promise.all([templateResponse.text(), logoResponse.text()])
@@ -38,6 +43,7 @@ export const TabLetter = ({ companyKey }: Props) => {
       setAddress([ctx.company, ctx.street, [ctx.zip, ctx.city].filter(Boolean).join(' '), ctx.country].filter(Boolean).join('\n'))
       setSignature(['S pozdravem', ctx.employee_name, ctx.employee_phone, ctx.employee_gsm, ctx.employee_email].filter(Boolean).join('\n'))
       setTemplate('<!doctype html>\n' + document.documentElement.outerHTML)
+      setLibrary(images)
     }
     setLoading(true)
     setError('')
@@ -47,52 +53,29 @@ export const TabLetter = ({ companyKey }: Props) => {
     return () => { active = false }
   }, [companyKey])
 
-  const prepare = () => {
+  const prepare = async () => {
     if (!template || !address.trim() || !subject.trim() || !message.trim() || !signature.trim()) {
       setError('Doplňte adresu, předmět, text dopisu a podpis.')
       return ''
     }
-    const document = new DOMParser().parseFromString(template, 'text/html')
-    const setText = (selector: string, text: string) => {
-      const element = document.querySelector<HTMLElement>(selector)
-      if (!element) throw new Error('Šablona dopisu neobsahuje požadovanou část: ' + selector)
-      element.textContent = text
-      element.style.whiteSpace = 'pre-wrap'
-    }
+    setPreparing(true)
+    setHtml('')
     try {
-      setText('.recipient > div', address)
-      setText('.sender', sender)
-      setText('.meta', date)
-      setText('.footer > div', footer)
-      const letter = document.querySelector('.letter')
-      if (!letter) throw new Error('Šablona dopisu neobsahuje textovou část.')
-      letter.replaceChildren()
-      const heading = document.createElement('h2')
-      heading.textContent = subject
-      letter.append(heading)
-      for (const paragraph of message.trim().split(/\n\s*\n/)) {
-        const p = document.createElement('p')
-        p.textContent = paragraph
-        p.style.whiteSpace = 'pre-wrap'
-        letter.append(p)
-      }
-      const sign = document.createElement('div')
-      sign.className = 'signature'
-      sign.textContent = signature
-      sign.style.whiteSpace = 'pre-wrap'
-      letter.append(sign)
-      document.title = `Dopis – ${address.split('\n')[0]}`
+      const content = await composeLetter(template, { address, sender, date, footer, subject, message, signature }, illustrations, library)
+      await validateLetterPagination(content)
       setError('')
-      return '<!doctype html>\n' + document.documentElement.outerHTML
+      return content
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Dopis se nepodařilo sestavit.')
       return ''
+    } finally {
+      setPreparing(false)
     }
   }
 
-  const preview = () => { const content = prepare(); if (content) setHtml(content) }
-  const download = () => {
-    const content = prepare()
+  const preview = async () => { const content = await prepare(); if (content) setHtml(content) }
+  const download = async () => {
+    const content = await prepare()
     if (!content) return
     const url = URL.createObjectURL(new Blob([content], { type: 'text/html;charset=utf-8' }))
     const anchor = document.createElement('a')
@@ -109,12 +92,18 @@ export const TabLetter = ({ companyKey }: Props) => {
     <div className="space-y-4">
       <p className="text-sm text-gray-500">AI vytvoří pouze obsah dopisu. Adresa a podpis se doplní do hlavičkového papíru. Nic se neodesílá ani nezapisuje jako uskutečněná korespondence. Návrh uložte do HTML; při zavření detailu se neuložené úpravy ztratí.</p>
       {error && <p role="alert" className="text-sm text-red-700">{error}</p>}
+      <fieldset disabled={preparing} className="space-y-4 min-w-0">
       {template && <AiCorrespondencePanel
         companyKey={companyKey}
         channel="letter"
         recipient={address}
         onGeneratingChange={setGenerating}
-        onDraft={draft => { setSubject(draft.subject ?? ''); setMessage(draft.message); setHtml('') }}
+        onDraft={draft => {
+          setSubject(draft.subject ?? '')
+          setMessage(draft.message)
+          setIllustrations(draft.illustrations ?? [])
+          setHtml('')
+        }}
       />}
       <div className="grid md:grid-cols-2 gap-4">
         <label className="text-sm">Adresa příjemce<textarea className={inputClass} rows={5} value={address} onChange={e => setAddress(e.target.value)} /></label>
@@ -127,14 +116,52 @@ export const TabLetter = ({ companyKey }: Props) => {
         <label className="text-sm">Podpis<textarea className={inputClass} rows={5} value={signature} onChange={e => setSignature(e.target.value)} /></label>
         <label className="text-sm">Patička<textarea className={inputClass} rows={5} value={footer} onChange={e => setFooter(e.target.value)} /></label>
       </div>
+      <section className="rounded-lg border border-gray-200 p-3 space-y-3">
+        <h3 className="text-sm font-semibold">Obrazová příloha – druhá strana</h3>
+        <p className="text-sm text-gray-500">AI vybere nejvýše dva obrázky funkcí zmíněných v dopise. Výběr i popisky můžete upravit. Příloha je vždy A4 na výšku. Jeden obrázek se otočí o 90°, dva obrázky budou pod sebou bez otočení. Obrázky se vloží přímo do staženého HTML.</p>
+        {library.map(image => {
+          const selected = illustrations.find(item => item.id === image.id)
+          return (
+            <div key={image.id} className="space-y-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={!!selected}
+                  disabled={generating || (!selected && illustrations.length >= 2)}
+                  onChange={event => {
+                    setIllustrations(current => event.target.checked
+                      ? [...current, { id: image.id, caption: image.description }]
+                      : current.filter(item => item.id !== image.id))
+                    setHtml('')
+                  }} />
+                {image.name}
+              </label>
+              {selected && <div className="grid md:grid-cols-2 gap-3">
+                <img src={`${import.meta.env.BASE_URL}${image.file}`} alt={image.name} className="w-full max-h-48 object-contain border border-gray-200" />
+                <label className="text-sm">Popisek obrázku
+                  <textarea className={inputClass} rows={4} maxLength={500} value={selected.caption} disabled={generating}
+                    onChange={event => {
+                      setIllustrations(current => current.map(item => item.id === image.id ? { ...item, caption: event.target.value } : item))
+                      setHtml('')
+                    }} />
+                </label>
+              </div>}
+            </div>
+          )
+        })}
+        {!illustrations.length && <p className="text-xs text-gray-500">Bez vybraného obrázku se příloha nevytvoří.</p>}
+      </section>
       <div className="flex gap-3">
-        <button type="button" disabled={generating || !template} onClick={preview} className="px-4 py-2 rounded-lg bg-teal-700 text-white disabled:opacity-50">Náhled dopisu</button>
-        <button type="button" disabled={generating || !template} onClick={download} className="px-4 py-2 rounded-lg border border-gray-300 disabled:opacity-50">Stáhnout HTML</button>
+        <button type="button" disabled={generating || preparing || !template} onClick={preview} className="px-4 py-2 rounded-lg bg-teal-700 text-white disabled:opacity-50">{preparing ? 'Připravuji…' : 'Náhled dopisu'}</button>
+        <button type="button" disabled={generating || preparing || !template} onClick={download} className="px-4 py-2 rounded-lg border border-gray-300 disabled:opacity-50">Stáhnout HTML</button>
       </div>
+      </fieldset>
       {html && (
         <div>
-          <p className="text-xs text-gray-500 mb-2">Náhled odpovídá poslednímu sestavení. Po úpravě textu klikněte znovu na Náhled dopisu. Kliknutím na logo v náhledu otevřete tisk / PDF. Tiskněte A4 na 100 % bez záhlaví a zápatí prohlížeče; před tiskem zkontrolujte počet stran.</p>
-          <iframe title="Náhled dopisu" srcDoc={html} className="w-full border border-gray-200 rounded-lg h-[1150px]" />
+          <p className="text-xs text-gray-500 mb-2">Náhled odpovídá poslednímu sestavení. Po úpravě textu klikněte znovu na Náhled dopisu. Obrazová příloha je níže pod první stranou. Kliknutím na logo v náhledu otevřete tisk / PDF. Tiskněte A4 na výšku na 100 % bez záhlaví a zápatí prohlížeče; před tiskem zkontrolujte počet stran.</p>
+          <iframe title="Náhled dopisu" srcDoc={html} className="w-full border border-gray-200 rounded-lg min-h-[1150px]"
+            onLoad={event => {
+              const frame = event.currentTarget
+              if (frame.contentDocument) frame.style.height = `${frame.contentDocument.documentElement.scrollHeight + 24}px`
+            }} />
         </div>
       )}
     </div>

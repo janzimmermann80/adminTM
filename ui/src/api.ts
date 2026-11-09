@@ -333,13 +333,30 @@ export const getAiCorrespondenceTypes = (channel: 'email' | 'sms' | 'letter') =>
 export const saveAiCorrespondenceTypes = (channel: 'email' | 'sms' | 'letter', types: AiCorrespondenceType[]) =>
   put<{ success: boolean }>(`/ai-correspondence/types?channel=${channel}`, types)
 
+export interface LetterImage {
+  id: string
+  name: string
+  file: string
+  description: string
+}
+export interface LetterIllustration {
+  id: string
+  caption: string
+}
+export interface CorrespondenceDraft {
+  subject?: string
+  message: string
+  illustrations?: LetterIllustration[]
+}
+export const getLetterImages = () => get<LetterImage[]>('/ai-correspondence/letter-images')
+
 export const generateCorrespondenceDraft = (body: {
   company_key: number
   channel: 'email' | 'sms' | 'letter'
   recipient: string
   type_id: string
   model: AiCorrespondenceModel
-}) => post<{ subject?: string; message: string }>('/ai-correspondence/draft', body)
+}) => post<CorrespondenceDraft>('/ai-correspondence/draft', body)
 export const sendMail = (body: {
   company_key: number; to: string; sender: string
   subject: string; message: string

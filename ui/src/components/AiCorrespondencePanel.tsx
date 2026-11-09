@@ -10,6 +10,7 @@ import {
   type AiCorrespondenceDataSource,
   type AiCorrespondenceModel,
   type AiCorrespondenceType,
+  type CorrespondenceDraft,
 } from '../api'
 import { Spinner } from './Spinner'
 
@@ -17,7 +18,7 @@ interface Props {
   companyKey: string
   channel: 'email' | 'sms' | 'letter'
   recipient: string
-  onDraft: (draft: { subject?: string; message: string }, noteType: string) => void
+  onDraft: (draft: CorrespondenceDraft, noteType: string) => void
   onGeneratingChange: (generating: boolean) => void
 }
 

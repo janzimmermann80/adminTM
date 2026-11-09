@@ -8,7 +8,7 @@
     * { box-sizing: border-box; }
     :root { --address-left: 100mm; --address-top: 39.5mm; }
     body { margin: 0; background: #edf1f3; color: #23343d; font-family: Arial, sans-serif; }
-    .page { position: relative; width: 210mm; min-height: 297mm; margin: 0 auto 24px; padding: 100mm 20mm 15mm; background: white; box-shadow: 0 4px 24px #0002; display: flex; flex-direction: column; }
+    .page { page: letter; position: relative; width: 210mm; min-height: 297mm; margin: 0 auto 24px; padding: 100mm 20mm 15mm; background: white; box-shadow: 0 4px 24px #0002; display: flex; flex-direction: column; }
     .header { position: absolute; top: 10mm; left: 20mm; right: 20mm; display: flex; align-items: center; justify-content: space-between; gap: 10mm; padding-bottom: 5mm; border-bottom: 0.5mm solid #0a6b6b; }
     .header img { width: 62mm; max-height: 18mm; object-fit: contain; object-position: left center; }
     .print-logo { border: 0; padding: 0; background: none; cursor: pointer; }
@@ -26,10 +26,21 @@
     .footer { margin-top: auto; padding-top: 12mm; font-size: 8pt; line-height: 1.5; color: #667780; }
     .footer > div { border-top: 0.3mm solid #bac9cd; padding-top: 4mm; }
     [contenteditable]:focus { outline: 1px solid #0a6b6b; outline-offset: 3px; }
+    .illustrations-page { page: illustrations; width: 210mm; height: 297mm; margin: 0 auto 24px; padding: 15mm; background: white; box-shadow: 0 4px 24px #0002; display: flex; flex-direction: column; gap: 8mm; break-before: page; }
+    .illustrations-page h2 { flex: none; margin: 0; font-size: 16pt; line-height: 1.3; color: #0a6b6b; }
+    .illustrations-page figure { flex: 1; min-height: 0; margin: 0; display: flex; flex-direction: column; gap: 3mm; }
+    .illustration-frame { flex: 1; min-height: 0; }
+    .illustration-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
+    .single .illustration-frame { position: relative; container-type: size; }
+    .single .illustration-frame img { position: absolute; left: 50%; top: 50%; width: 100cqh; height: 100cqw; transform: translate(-50%, -50%) rotate(90deg); }
+    .illustrations-page figcaption { flex: none; font-size: 11pt; line-height: 1.4; overflow-wrap: anywhere; white-space: pre-wrap; }
     @page { size: A4; margin: 0; }
+    @page letter { size: A4 portrait; margin: 0; }
+    @page illustrations { size: A4 portrait; margin: 0; }
     @media print {
       body { background: white; }
-      .page { margin: 0; box-shadow: none; }
+      .page, .illustrations-page { margin: 0; box-shadow: none; }
+      .illustrations-page, .illustrations-page figure { break-inside: avoid; }
       [contenteditable]:focus { outline: none; }
       .header, .letter h2 { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
       .letter p, .signature, .artwork, .footer { break-inside: avoid; }
