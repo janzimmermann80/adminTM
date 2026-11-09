@@ -1,4 +1,4 @@
-import type { LetterImage, LetterIllustration } from '../../api'
+import { getLetterImageContent, type LetterImage, type LetterIllustration } from '../../api'
 
 interface LetterFields {
   address: string
@@ -11,6 +11,9 @@ interface LetterFields {
 }
 
 async function embedImage(file: string) {
+  if (file.startsWith('/ai-correspondence/letter-images/')) {
+    return (await getLetterImageContent(file)).dataUrl
+  }
   const response = await fetch(`${import.meta.env.BASE_URL}${file}`)
   if (!response.ok) throw new Error('Obrázek přílohy se nepodařilo načíst: ' + file)
   const blob = await response.blob()
@@ -72,9 +75,11 @@ export async function composeLetter(
     const appendix = document.createElement('section')
     appendix.className = `illustrations-page ${images.length === 1 ? 'single' : 'double'}`
     appendix.setAttribute('aria-label', 'Obrazová příloha dopisu')
+    const content = document.createElement('div')
+    content.className = 'illustrations-content'
     const title = document.createElement('h2')
     title.textContent = 'TruckManager v praxi'
-    appendix.append(title)
+    content.append(title)
     for (const image of images) {
       const figure = document.createElement('figure')
       const frame = document.createElement('div')
@@ -90,8 +95,9 @@ export async function composeLetter(
       description.textContent = image.caption
       caption.append(name, description)
       figure.append(frame, caption)
-      appendix.append(figure)
+      content.append(figure)
     }
+    appendix.append(content)
     document.body.append(appendix)
   }
   document.title = `Dopis – ${fields.address.split('\n')[0]}`
@@ -120,7 +126,7 @@ export async function validateLetterPagination(html: string) {
     if (content.querySelector('.illustrations-page') && page.getBoundingClientRect().height > 297 * pixelsPerMm + 1) {
       throw new Error('Text dopisu přesahuje první stranu A4. Zkraťte text nebo podpis, aby obrazová příloha zůstala na druhé straně.')
     }
-    for (const section of content.querySelectorAll<HTMLElement>('.illustrations-page, .illustrations-page figcaption')) {
+    for (const section of content.querySelectorAll<HTMLElement>('.illustrations-page, .illustrations-content, .illustrations-page figcaption')) {
       if (section.scrollHeight > section.clientHeight + 1 || section.scrollWidth > section.clientWidth + 1) {
         throw new Error('Obrazová příloha přesahuje stránku. Zkraťte popisky obrázků.')
       }

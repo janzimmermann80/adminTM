@@ -349,6 +349,9 @@ export interface CorrespondenceDraft {
   illustrations?: LetterIllustration[]
 }
 export const getLetterImages = () => get<LetterImage[]>('/ai-correspondence/letter-images')
+export const getLetterImageContent = (path: string) => get<{ dataUrl: string }>(path)
+export const uploadLetterImage = (filename: string, description: string, dataUrl: string) =>
+  put<{ image: LetterImage; replaced: boolean }>('/ai-correspondence/letter-images', { filename, description, dataUrl })
 
 export const generateCorrespondenceDraft = (body: {
   company_key: number

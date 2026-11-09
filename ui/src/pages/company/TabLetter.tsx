@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { getLetterImages, getMailContext, type LetterImage, type LetterIllustration } from '../../api'
 import { AiCorrespondencePanel } from '../../components/AiCorrespondencePanel'
 import { Spinner } from '../../components/Spinner'
+import { LetterImagePreview } from '../../components/LetterImagePreview'
 import { composeLetter, validateLetterPagination } from './letterDocument'
 
 interface Props { companyKey: string }
@@ -98,6 +99,7 @@ export const TabLetter = ({ companyKey }: Props) => {
         channel="letter"
         recipient={address}
         onGeneratingChange={setGenerating}
+        onLetterImagesChange={images => { setLibrary(images); setHtml('') }}
         onDraft={draft => {
           setSubject(draft.subject ?? '')
           setMessage(draft.message)
@@ -118,7 +120,7 @@ export const TabLetter = ({ companyKey }: Props) => {
       </div>
       <section className="rounded-lg border border-gray-200 p-3 space-y-3">
         <h3 className="text-sm font-semibold">Obrazová příloha – druhá strana</h3>
-        <p className="text-sm text-gray-500">AI vybere nejvýše dva obrázky funkcí zmíněných v dopise. Výběr i popisky můžete upravit. Příloha je vždy A4 na výšku. Jeden obrázek se otočí o 90°, dva obrázky budou pod sebou bez otočení. Obrázky se vloží přímo do staženého HTML.</p>
+        <p className="text-sm text-gray-500">AI vybere nejvýše dva obrázky funkcí zmíněných v dopise. Výběr i popisky můžete upravit. Příloha je vždy A4 na výšku. Jeden obrázek se včetně nadpisu a popisku otočí o 90°, dva obrázky budou pod sebou bez otočení. Obrázky se vloží přímo do staženého HTML.</p>
         {library.map(image => {
           const selected = illustrations.find(item => item.id === image.id)
           return (
@@ -135,7 +137,7 @@ export const TabLetter = ({ companyKey }: Props) => {
                 {image.name}
               </label>
               {selected && <div className="grid md:grid-cols-2 gap-3">
-                <img src={`${import.meta.env.BASE_URL}${image.file}`} alt={image.name} className="w-full max-h-48 object-contain border border-gray-200" />
+                <LetterImagePreview image={image} />
                 <label className="text-sm">Popisek obrázku
                   <textarea className={inputClass} rows={4} maxLength={500} value={selected.caption} disabled={generating}
                     onChange={event => {

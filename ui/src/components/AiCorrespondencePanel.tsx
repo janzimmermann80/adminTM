@@ -11,8 +11,10 @@ import {
   type AiCorrespondenceModel,
   type AiCorrespondenceType,
   type CorrespondenceDraft,
+  type LetterImage,
 } from '../api'
 import { Spinner } from './Spinner'
+import { LetterImageManager } from './LetterImageManager'
 
 interface Props {
   companyKey: string
@@ -20,12 +22,13 @@ interface Props {
   recipient: string
   onDraft: (draft: CorrespondenceDraft, noteType: string) => void
   onGeneratingChange: (generating: boolean) => void
+  onLetterImagesChange?: (images: LetterImage[]) => void
 }
 
 const createId = () => globalThis.crypto?.randomUUID?.()
   ?? `ai-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
-export const AiCorrespondencePanel = ({ companyKey, channel, recipient, onDraft, onGeneratingChange }: Props) => {
+export const AiCorrespondencePanel = ({ companyKey, channel, recipient, onDraft, onGeneratingChange, onLetterImagesChange }: Props) => {
   const [types, setTypes] = useState<AiCorrespondenceType[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [editId, setEditId] = useState('')
@@ -240,6 +243,7 @@ export const AiCorrespondencePanel = ({ companyKey, channel, recipient, onDraft,
             className="flex items-center gap-2 px-3 py-2 text-xs font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">
             {saving ? <Spinner size={4} /> : 'Uložit AI typy'}
           </button>
+          {channel === 'letter' && <LetterImageManager onChange={onLetterImagesChange} />}
         </div>
       ) : (
         <div className="flex flex-wrap items-center gap-2">

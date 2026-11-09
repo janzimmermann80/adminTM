@@ -26,13 +26,14 @@
     .footer { margin-top: auto; padding-top: 12mm; font-size: 8pt; line-height: 1.5; color: #667780; }
     .footer > div { border-top: 0.3mm solid #bac9cd; padding-top: 4mm; }
     [contenteditable]:focus { outline: 1px solid #0a6b6b; outline-offset: 3px; }
-    .illustrations-page { page: illustrations; width: 210mm; height: 297mm; margin: 0 auto 24px; padding: 15mm; background: white; box-shadow: 0 4px 24px #0002; display: flex; flex-direction: column; gap: 8mm; break-before: page; }
+    .illustrations-page { page: illustrations; position: relative; width: 210mm; height: 297mm; margin: 0 auto 24px; padding: 15mm; background: white; box-shadow: 0 4px 24px #0002; break-before: page; }
+    .illustrations-content { height: 100%; display: flex; flex-direction: column; gap: 8mm; }
+    .illustrations-page.single { overflow: hidden; }
+    .single .illustrations-content { position: absolute; left: 50%; top: 50%; width: 267mm; height: 180mm; transform: translate(-50%, -50%) rotate(90deg); }
     .illustrations-page h2 { flex: none; margin: 0; font-size: 16pt; line-height: 1.3; color: #0a6b6b; }
     .illustrations-page figure { flex: 1; min-height: 0; margin: 0; display: flex; flex-direction: column; gap: 3mm; }
     .illustration-frame { flex: 1; min-height: 0; }
     .illustration-frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
-    .single .illustration-frame { position: relative; container-type: size; }
-    .single .illustration-frame img { position: absolute; left: 50%; top: 50%; width: 100cqh; height: 100cqw; transform: translate(-50%, -50%) rotate(90deg); }
     .illustrations-page figcaption { flex: none; font-size: 11pt; line-height: 1.4; overflow-wrap: anywhere; white-space: pre-wrap; }
     @page { size: A4; margin: 0; }
     @page letter { size: A4 portrait; margin: 0; }
