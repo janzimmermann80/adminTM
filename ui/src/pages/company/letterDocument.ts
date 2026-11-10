@@ -31,6 +31,7 @@ async function embedImage(file: string) {
 
 export async function composeLetter(
   template: string, fields: LetterFields, illustrations: LetterIllustration[], library: LetterImage[],
+  includeImageText = true,
 ) {
   if (illustrations.length > 2 || new Set(illustrations.map(image => image.id)).size !== illustrations.length) {
     throw new Error('Vyberte nejvýše dva různé obrázky.')
@@ -38,7 +39,7 @@ export async function composeLetter(
   const images = await Promise.all(illustrations.map(async illustration => {
     const image = library.find(item => item.id === illustration.id)
     if (!image) throw new Error('Vybraný obrázek již není v knihovně.')
-    if (!illustration.caption.trim() || illustration.caption.length > 500) {
+    if (includeImageText && (!illustration.caption.trim() || illustration.caption.length > 500)) {
       throw new Error('Doplňte popisek každého obrázku (nejvýše 500 znaků).')
     }
     return { ...image, caption: illustration.caption, src: await embedImage(image.file) }
@@ -77,9 +78,11 @@ export async function composeLetter(
     appendix.setAttribute('aria-label', 'Obrazová příloha dopisu')
     const content = document.createElement('div')
     content.className = 'illustrations-content'
-    const title = document.createElement('h2')
-    title.textContent = 'TruckManager v praxi'
-    content.append(title)
+    if (includeImageText) {
+      const title = document.createElement('h2')
+      title.textContent = 'TruckManager v praxi'
+      content.append(title)
+    }
     for (const image of images) {
       const figure = document.createElement('figure')
       const frame = document.createElement('div')
@@ -88,13 +91,16 @@ export async function composeLetter(
       img.src = image.src
       img.alt = image.name
       frame.append(img)
-      const caption = document.createElement('figcaption')
-      const name = document.createElement('strong')
-      name.textContent = image.name
-      const description = document.createElement('div')
-      description.textContent = image.caption
-      caption.append(name, description)
-      figure.append(frame, caption)
+      figure.append(frame)
+      if (includeImageText) {
+        const caption = document.createElement('figcaption')
+        const name = document.createElement('strong')
+        name.textContent = image.name
+        const description = document.createElement('div')
+        description.textContent = image.caption
+        caption.append(name, description)
+        figure.append(caption)
+      }
       content.append(figure)
     }
     appendix.append(content)

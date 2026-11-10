@@ -22,6 +22,7 @@ export const TabLetter = ({ companyKey }: Props) => {
   const [preparing, setPreparing] = useState(false)
   const [library, setLibrary] = useState<LetterImage[]>([])
   const [illustrations, setIllustrations] = useState<LetterIllustration[]>([])
+  const [includeImageText, setIncludeImageText] = useState(true)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -62,7 +63,7 @@ export const TabLetter = ({ companyKey }: Props) => {
     setPreparing(true)
     setHtml('')
     try {
-      const content = await composeLetter(template, { address, sender, date, footer, subject, message, signature }, illustrations, library)
+      const content = await composeLetter(template, { address, sender, date, footer, subject, message, signature }, illustrations, library, includeImageText)
       await validateLetterPagination(content)
       setError('')
       return content
@@ -121,6 +122,12 @@ export const TabLetter = ({ companyKey }: Props) => {
       <section className="rounded-lg border border-gray-200 p-3 space-y-3">
         <h3 className="text-sm font-semibold">Obrazová příloha – druhá strana</h3>
         <p className="text-sm text-gray-500">AI vybere nejvýše dva obrázky funkcí zmíněných v dopise. Výběr i popisky můžete upravit. Příloha je vždy A4 na výšku. Jeden obrázek se včetně nadpisu a popisku otočí o 90°, dva obrázky budou pod sebou bez otočení. Obrázky se vloží přímo do staženého HTML.</p>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={includeImageText} disabled={generating}
+            onChange={event => { setIncludeImageText(event.target.checked); setHtml('') }} />
+          Přidat texty k obrázkům
+        </label>
+        <p className="text-xs text-gray-500">Vypnutím se vynechá nadpis přílohy, názvy i popisky a obrázky využijí maximum místa v tiskové ploše. Popisky zůstanou zachované pro opětovné zapnutí.</p>
         {library.map(image => {
           const selected = illustrations.find(item => item.id === image.id)
           return (
@@ -138,13 +145,13 @@ export const TabLetter = ({ companyKey }: Props) => {
               </label>
               {selected && <div className="grid md:grid-cols-2 gap-3">
                 <LetterImagePreview image={image} />
-                <label className="text-sm">Popisek obrázku
+                {includeImageText && <label className="text-sm">Popisek obrázku
                   <textarea className={inputClass} rows={4} maxLength={500} value={selected.caption} disabled={generating}
                     onChange={event => {
                       setIllustrations(current => current.map(item => item.id === image.id ? { ...item, caption: event.target.value } : item))
                       setHtml('')
                     }} />
-                </label>
+                </label>}
               </div>}
             </div>
           )
