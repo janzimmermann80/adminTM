@@ -617,3 +617,67 @@ export const getImports = () => get<ImportServiceRow[]>('/imports')
 
 export const getImportCars = (companyKey: number, importType: string) =>
   get<ImportCarRow[]>(`/imports/${companyKey}/${encodeURIComponent(importType)}/cars`)
+
+export type OrderCheckFilters = {
+  from: string
+  to: string
+  prefixGroup: 'wood' | 'gps'
+  companyKey?: string
+  carKey?: string
+}
+
+export type OrderCheckEvent = {
+  time: string
+  type: 'L' | 'U'
+  pos_gps: string | null
+  order_number: string
+  car_key: number | null
+  spz: string | null
+  company_key: number | null
+  company: string | null
+  city_name: string | null
+  zip: string | null
+  country: string | null
+  driver_name: string | null
+}
+
+export type OrderCheckRow = {
+  orderNumber: string
+  carKey: number | null
+  companyKey: number | null
+  company: string | null
+  spz: string | null
+  driverName: string | null
+  distance: number
+  events: OrderCheckEvent[]
+  coordinates: string[]
+}
+
+export type OrderCheckOptions = {
+  companies: { company_key: number; company: string }[]
+  cars: { car_key: number; company_key: number; spz: string; company: string }[]
+}
+
+export const getOrderCheckOptions = () => get<OrderCheckOptions>('/truckmanager/order-check/options')
+
+export const runOrderCheck = (filters: OrderCheckFilters) =>
+  post<OrderCheckRow[]>('/truckmanager/order-check', filters)
+
+export const exportOrderCheck = async (filters: OrderCheckFilters): Promise<Blob> => {
+  const r = await fetch(buildUrl('/truckmanager/order-check/export'), {
+    method: 'POST',
+    headers: h(),
+    body: JSON.stringify(filters),
+  })
+  if (r.status === 401) {
+    localStorage.removeItem('token')
+    window.location.hash = '#/login'
+    throw new Error('Unauthorized')
+  }
+  if (!r.ok) {
+    let msg = 'Export selhal'
+    try { msg = (await r.json()).error ?? msg } catch {}
+    throw new Error(msg)
+  }
+  return r.blob()
+}

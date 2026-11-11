@@ -1,7 +1,293 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
+import ExcelJS from 'exceljs'
 import { getUserSql } from '../db/userSql.js'
 
+const ORDER_PREFIX_GROUPS: Record<string, string[]> = {
+  wood: ['ZA', 'ZB', 'ZD', 'ZM', 'ZS', 'ZJ', 'MA'],
+  gps: ['LC', 'LD'],
+}
+
+type OrderCheckFilters = {
+  from?: string
+  to?: string
+  prefixGroup?: string
+  companyKey?: string
+  carKey?: string
+}
+
+type ParsedOrderCheckFilters = {
+  from: string
+  toExclusive: string
+  prefixes: string[]
+  companyKey: number | null
+  carKey: number | null
+}
+
+type OrderCheckEvent = {
+  time: string
+  type: string
+  pos_gps: string | null
+  order_number: string
+  car_key: number | null
+  spz: string | null
+  company_key: number | null
+  company: string | null
+  city_name: string | null
+  zip: string | null
+  country: string | null
+  driver_name: string | null
+}
+
+function parseOrderCheckFilters(q: OrderCheckFilters) {
+  const validDate = (value: string | undefined) => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null
+    const date = new Date(`${value}T00:00:00.000Z`)
+    if (Number.isNaN(date.getTime())) return null
+    return date.toISOString().slice(0, 10) === value ? date : null
+  }
+
+  const from = validDate(q.from)
+  const to = validDate(q.to)
+  if (!from || !to) return { error: 'Zadejte platné datum od a do.' as const }
+
+  const daySpan = (to.getTime() - from.getTime()) / 86_400_000
+  if (daySpan < 0) return { error: 'Datum „do“ nesmí být před datem „od“.' as const }
+  if (daySpan > 40) return { error: 'Rozsah může být maximálně 40 dní.' as const }
+
+  const prefixGroup = q.prefixGroup ?? 'wood'
+  if (!ORDER_PREFIX_GROUPS[prefixGroup]) {
+    return { error: 'Neplatná sada prefixů objednávek.' as const }
+  }
+
+  const parseKey = (value: string | undefined) => {
+    if (!value) return null
+    const key = Number(value)
+    return Number.isSafeInteger(key) && key > 0 ? key : NaN
+  }
+  const companyKey = parseKey(q.companyKey)
+  const carKey = parseKey(q.carKey)
+  if (Number.isNaN(companyKey) || Number.isNaN(carKey)) {
+    return { error: 'Neplatný filtr firmy nebo vozidla.' as const }
+  }
+
+  const toExclusive = new Date(to.getTime() + 86_400_000).toISOString().slice(0, 10)
+  return {
+    from: from.toISOString().slice(0, 10),
+    toExclusive,
+    prefixes: ORDER_PREFIX_GROUPS[prefixGroup],
+    companyKey,
+    carKey,
+  }
+}
+
+async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: ParsedOrderCheckFilters) {
+  const prefixCondition = filters.prefixes.slice(1).reduce(
+    (condition, prefix) => sql`${condition} OR upper(substr(S.order_number, 1, 2)) = ${prefix}`,
+    sql`upper(substr(S.order_number, 1, 2)) = ${filters.prefixes[0]}`,
+  )
+  const candidates = sql`
+    SELECT DISTINCT S.order_number
+    FROM gps.service_base AS S
+    LEFT JOIN gps.car_base AS C ON S.car_key = C.car_key
+    WHERE S.order_number IS NOT NULL
+      AND S.type = 'U'
+      AND S.time >= ${filters.from}::date
+      AND S.time < ${filters.toExclusive}::date
+      AND (${prefixCondition})
+      ${filters.carKey ? sql`AND S.car_key = ${filters.carKey}` : sql``}
+      ${filters.companyKey ? sql`AND C.company_key = ${filters.companyKey}` : sql``}
+  `
+
+  const [events, trackRows] = await Promise.all([
+    sql`
+      WITH order_candidates AS (${candidates})
+      SELECT S.time, S.type, S.pos_gps, S.order_number, S.car_key,
+             C.spz, C.company_key, CO.company,
+             MC.name AS city_name, MC.zip, MC.country,
+             D.name AS driver_name
+      FROM gps.service_base AS S
+      INNER JOIN order_candidates AS OC ON OC.order_number = S.order_number
+      LEFT JOIN gps.car_base AS C ON S.car_key = C.car_key
+      LEFT JOIN provider.company AS CO ON C.company_key = CO.company_key
+      LEFT JOIN map.city AS MC ON S.city_key = MC.city_key
+      LEFT JOIN gps.driver_base AS D ON S.driver_key = D.driver_key
+      WHERE S.time >= ${filters.from}::date
+        AND S.time < ${filters.toExclusive}::date
+        AND S.type IN ('L', 'U')
+      ORDER BY S.order_number, S.time ASC
+    `,
+    sql`
+      WITH order_candidates AS (${candidates})
+      , track_points AS (
+        SELECT X.order_number, T.pos_gps, T.distance, T.time, T.pos_key,
+               row_number() OVER (PARTITION BY X.order_number ORDER BY T.time, T.pos_key) AS point_number,
+               count(*) OVER (PARTITION BY X.order_number) AS point_count
+        FROM gps.tracking_order AS X
+        INNER JOIN order_candidates AS OC ON OC.order_number = X.order_number
+        INNER JOIN gps.tracking AS T ON T.pos_key = X.pos_key
+        WHERE T.time >= ${filters.from}::date
+          AND T.time < ${filters.toExclusive}::date
+          AND T.truck_status = 'M'
+      )
+      SELECT order_number,
+             sum(distance) AS distance,
+             array_agg(pos_gps ORDER BY time, pos_key) FILTER (
+               WHERE point_number = 1
+                  OR point_number = point_count
+                  OR mod(point_number, greatest(1, ceil(point_count::numeric / 60)::bigint)) = 0
+             ) AS coordinates
+      FROM track_points
+      GROUP BY order_number
+    `,
+  ])
+
+  const byOrder = new Map<string, {
+    orderNumber: string
+    carKey: number | null
+    companyKey: number | null
+    company: string | null
+    spz: string | null
+    driverName: string | null
+    distance: number
+    events: OrderCheckEvent[]
+    coordinates: string[]
+  }>()
+
+  for (const event of events) {
+    const key = String(event.order_number)
+    let order = byOrder.get(key)
+    if (!order) {
+      order = {
+        orderNumber: key,
+        carKey: event.car_key === null ? null : Number(event.car_key),
+        companyKey: event.company_key === null ? null : Number(event.company_key),
+        company: event.company ?? null,
+        spz: event.spz ?? null,
+        driverName: event.driver_name ?? null,
+        distance: 0,
+        events: [],
+        coordinates: [],
+      }
+      byOrder.set(key, order)
+    }
+    order.events.push({
+      ...event,
+      time: event.time instanceof Date ? event.time.toISOString() : String(event.time),
+    } as OrderCheckEvent)
+  }
+
+  for (const point of trackRows) {
+    const order = byOrder.get(String(point.order_number))
+    if (!order) continue
+    const rawCoordinates: unknown[] = Array.isArray(point.coordinates) ? point.coordinates : []
+    for (const rawValue of rawCoordinates) {
+      const raw = typeof rawValue === 'string' ? rawValue : ''
+      const coords = raw.replace(/^\(|\)$/g, '').split(',')
+      if (coords.length === 2 && coords.every((part: string) => Number.isFinite(Number(part)))) {
+        order.coordinates.push(`${coords[0].trim()},${coords[1].trim()}`)
+      }
+    }
+    order.distance = Number(point.distance ?? 0)
+  }
+
+  return Array.from(byOrder.values()).sort((a, b) => a.orderNumber.localeCompare(b.orderNumber))
+}
+
 export async function truckmanagerRoutes(app: FastifyInstance) {
+
+  // GET /api/truckmanager/order-check/options
+  app.get('/order-check/options', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const [companies, cars] = await Promise.all([
+        sql`
+          SELECT DISTINCT C.company_key, C.company
+          FROM gps.car_base AS CB
+          INNER JOIN gps.export_car AS EC ON CB.car_key = EC.car_key
+          INNER JOIN provider.company AS C ON CB.company_key = C.company_key
+          WHERE EC.export_type = 'PREJM'
+          ORDER BY C.company
+        `,
+        sql`
+          SELECT DISTINCT CB.car_key, CB.company_key, CB.spz, C.company
+          FROM gps.car_base AS CB
+          INNER JOIN gps.export_car AS EC ON CB.car_key = EC.car_key
+          INNER JOIN provider.company AS C ON CB.company_key = C.company_key
+          WHERE EC.export_type = 'PREJM'
+          ORDER BY C.company, CB.spz
+        `,
+      ])
+      return reply.send({ companies, cars })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // POST /api/truckmanager/order-check
+  app.post('/order-check', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as OrderCheckFilters
+    const filters = parseOrderCheckFilters(body ?? {})
+    if ('error' in filters) return reply.code(400).send({ error: filters.error })
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      return reply.send(await loadOrderCheck(sql, filters))
+    } finally {
+      await sql.end()
+    }
+  })
+
+  // POST /api/truckmanager/order-check/export
+  app.post('/order-check/export', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as OrderCheckFilters
+    const filters = parseOrderCheckFilters(body ?? {})
+    if ('error' in filters) return reply.code(400).send({ error: filters.error })
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const rows = await loadOrderCheck(sql, filters)
+      const workbook = new ExcelJS.Workbook()
+      const sheet = workbook.addWorksheet('Kontrola objednávek')
+      sheet.columns = [
+        { header: 'Poř.', key: 'index', width: 7 },
+        { header: 'Firma', key: 'company', width: 30 },
+        { header: 'SPZ', key: 'spz', width: 14 },
+        { header: 'Řidič', key: 'driver', width: 24 },
+        { header: 'Zakázka', key: 'order', width: 20 },
+        { header: 'Km', key: 'distance', width: 12 },
+        { header: 'Pozice', key: 'events', width: 70 },
+      ]
+      rows.forEach((row, index) => {
+        sheet.addRow({
+          index: index + 1,
+          company: row.company ?? '',
+          spz: row.spz ?? '',
+          driver: row.driverName ?? '',
+          order: row.orderNumber,
+          distance: row.distance,
+          events: row.events.map(event =>
+            `${event.type === 'L' ? 'Nakl.' : 'Vykl.'} ${event.city_name ?? ''}, ${event.zip ?? ''} ${event.country ?? ''} ${event.time}`,
+          ).join('\n'),
+        })
+      })
+      sheet.getRow(1).font = { bold: true }
+      sheet.views = [{ state: 'frozen', ySplit: 1 }]
+      const buffer = await workbook.xlsx.writeBuffer()
+      return reply
+        .header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        .header('Content-Disposition', 'attachment; filename="kontrola-objednavek.xlsx"')
+        .send(Buffer.from(buffer))
+    } finally {
+      await sql.end()
+    }
+  })
 
   // GET /api/truckmanager/messages
   app.get('/messages', {

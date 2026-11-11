@@ -52,9 +52,9 @@ const IconStats = () => (
   </svg>
 )
 
-const IconTruck = () => (
+const IconSpruce = () => (
   <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M8 17a2 2 0 100-4 2 2 0 000 4zm8 0a2 2 0 100-4 2 2 0 000 4zM1 3h15v13H1zM16 8h4l3 3v5h-7V8z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 2l-4 7h2l-4 6h3l-5 6h16l-5-6h3l-4-6h2l-4-7zM12 21v2" />
   </svg>
 )
 
@@ -115,7 +115,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Nabídky',         icon: <IconOffer />,      disabled: true },
   { to: '/diary',              label: 'Deník',           icon: <IconDiary /> },
   { to: '/statistics',        label: 'Statistiky',      icon: <IconStats /> },
-  { label: 'TruckManager',    icon: <IconTruck />,      disabled: true },
+  { to: '/order-check',       label: 'Přejímka',          icon: <IconSpruce /> },
   { label: 'Odeslat e-mail',  icon: <IconEmail />,      disabled: true },
   { label: 'Odeslat SMS',     icon: <IconSms />,        disabled: true },
   { label: 'Kampaně',         icon: <IconCampaign />,   disabled: true },
