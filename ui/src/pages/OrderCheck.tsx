@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Layout } from '../components/Layout'
 import { Spinner } from '../components/Spinner'
+import { CompanyDetailModal } from '../components/CompanyDetailModal'
+import { PrejimkaCsvModal } from '../components/PrejimkaCsvModal'
 import {
   exportOrderCheck,
   getOrderCheckOptions,
@@ -52,12 +54,24 @@ const buildFilters = (
   ...(carKey ? { carKey } : {}),
 })
 
-const OrderRow = ({ row, index }: { row: OrderCheckRow; index: number }) => {
+const CompanyLink = ({ company, companyKey, onOpen }: {
+  company: string | null
+  companyKey: number | null
+  onOpen: (key: number) => void
+}) => companyKey === null
+  ? <>{company ?? 'Neznámá firma'}</>
+  : <button type="button" onClick={() => onOpen(companyKey)} className="text-teal-700 hover:underline text-left">
+    {company ?? 'Neznámá firma'}
+  </button>
+
+const OrderRow = ({ row, index, onOpenCompany }: { row: OrderCheckRow; index: number; onOpenCompany: (key: number) => void }) => {
   const routeUrl = mapUrl(row.coordinates)
   return (
     <tr className="align-top border-t border-gray-200">
       <td className="px-3 py-3 text-gray-500">{index + 1}</td>
-      <td className="px-3 py-3">{row.company ?? '—'}</td>
+      <td className="px-3 py-3">
+        <CompanyLink company={row.company} companyKey={row.companyKey} onOpen={onOpenCompany} />
+      </td>
       <td className="px-3 py-3 whitespace-nowrap">{row.spz ?? '—'}</td>
       <td className="px-3 py-3">{row.driverName ?? '—'}</td>
       <td className="px-3 py-3 font-medium whitespace-nowrap">{row.orderNumber}</td>
@@ -109,9 +123,13 @@ export const OrderCheck = () => {
   lastWeek.setDate(lastWeek.getDate() - 7)
   const [from, setFrom] = useState(toDateInput(lastWeek))
   const [to, setTo] = useState(today)
-  const [prefixGroup, setPrefixGroup] = useState<OrderCheckFilters['prefixGroup']>('wood')
+  const [prefixGroup, setPrefixGroup] = useState<OrderCheckFilters['prefixGroup']>('all')
   const [companyKey, setCompanyKey] = useState('')
   const [carKey, setCarKey] = useState('')
+  const [companyModal, setCompanyModal] = useState<number | null>(null)
+  const [csvCompany, setCsvCompany] = useState<{ company: string; companyKey: number; rows: OrderCheckRow[]; filters: OrderCheckFilters } | null>(null)
+  const [csvSent, setCsvSent] = useState(false)
+  const [resultFilters, setResultFilters] = useState<OrderCheckFilters | null>(null)
   const [options, setOptions] = useState<OrderCheckOptions | null>(null)
   const [rows, setRows] = useState<OrderCheckRow[] | null>(null)
   const [loading, setLoading] = useState(true)
@@ -134,12 +152,12 @@ export const OrderCheck = () => {
   )
 
   const groupedRows = useMemo(() => {
-    const groups = new Map<string, { company: string | null; rows: OrderCheckRow[] }>()
+    const groups = new Map<string, { company: string | null; companyKey: number | null; rows: OrderCheckRow[] }>()
     for (const row of rows ?? []) {
       const key = row.companyKey !== null ? `key:${row.companyKey}` : `name:${row.company ?? ''}`
       let group = groups.get(key)
       if (!group) {
-        group = { company: row.company, rows: [] }
+        group = { company: row.company, companyKey: row.companyKey, rows: [] }
         groups.set(key, group)
       }
       group.rows.push(row)
@@ -180,7 +198,9 @@ export const OrderCheck = () => {
     setSearching(true)
     setError(null)
     try {
-      setRows(await runOrderCheck(filters()))
+      const currentFilters = filters()
+      setRows(await runOrderCheck(currentFilters))
+      setResultFilters(currentFilters)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -213,6 +233,18 @@ export const OrderCheck = () => {
 
   return (
     <Layout>
+      {companyModal !== null && <CompanyDetailModal companyKey={String(companyModal)} onClose={() => setCompanyModal(null)} />}
+      {csvCompany && <PrejimkaCsvModal {...csvCompany} onSent={() => setCsvSent(true)} onClose={() => {
+        setCsvCompany(null)
+        if (csvSent) {
+          setCsvSent(false)
+          setSearching(true)
+          runOrderCheck(csvCompany.filters)
+            .then(setRows)
+            .catch(e => setError(e instanceof Error ? e.message : String(e)))
+            .finally(() => setSearching(false))
+        }
+      }} />}
       <div className="max-w-screen-2xl mx-auto">
         <div className="mb-5">
           <h1 className="text-xl font-semibold text-gray-800">Kontrola objednávek</h1>
@@ -235,6 +267,7 @@ export const OrderCheck = () => {
               Sada prefixů
               <select value={prefixGroup} onChange={e => setPrefixGroup(e.target.value as OrderCheckFilters['prefixGroup'])}
                 className="mt-1 block w-full rounded border border-gray-300 bg-white px-2.5 py-2 text-sm">
+                <option value="all">Všechny prefixy</option>
                 <option value="wood">ZA, ZB, ZD, ZM, ZS, ZJ, MA</option>
                 <option value="gps">LC, LD</option>
                 <option value="mm">MM</option>
@@ -302,10 +335,18 @@ export const OrderCheck = () => {
                     <tbody key={group.key}>
                       <tr className="bg-teal-50 border-t border-teal-100">
                         <th scope="rowgroup" colSpan={9} className="px-3 py-2 text-left font-semibold text-teal-900">
-                          {group.company ?? 'Neznámá firma'} <span className="font-normal text-teal-700">({group.rows.length})</span>
+                          <CompanyLink company={group.company} companyKey={group.companyKey} onOpen={setCompanyModal} /> <span className="font-normal text-teal-700">({group.rows.length})</span>
+                          {group.companyKey !== null && resultFilters && (
+                            <button type="button" onClick={() => setCsvCompany({
+                              company: group.company ?? 'Neznámá firma',
+                              companyKey: group.companyKey!,
+                              rows: group.rows,
+                              filters: resultFilters,
+                            })} className="ml-4 font-normal text-teal-700 hover:underline">Připravit CSV</button>
+                          )}
                         </th>
                       </tr>
-                      {group.rows.map((row, index) => <OrderRow key={row.orderNumber} row={row} index={group.start + index} />)}
+                      {group.rows.map((row, index) => <OrderRow key={row.orderNumber} row={row} index={group.start + index} onOpenCompany={setCompanyModal} />)}
                     </tbody>
                   ))}
                 </table>

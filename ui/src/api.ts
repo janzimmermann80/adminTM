@@ -621,7 +621,7 @@ export const getImportCars = (companyKey: number, importType: string) =>
 export type OrderCheckFilters = {
   from: string
   to: string
-  prefixGroup: 'wood' | 'gps' | 'mm'
+  prefixGroup: 'all' | 'wood' | 'gps' | 'mm'
   companyKey?: string
   carKey?: string
 }
@@ -671,6 +671,22 @@ export const getOrderCheckOptions = () => get<OrderCheckOptions>('/truckmanager/
 
 export const runOrderCheck = (filters: OrderCheckFilters) =>
   post<OrderCheckRow[]>('/truckmanager/order-check', filters)
+
+export type PrejimkaCsvPreview = {
+  orderNumber: string
+  pointCount: number
+  gps1: string
+  gps2: string
+}
+
+export const preparePrejimkaCsv = (filters: OrderCheckFilters, orders: string[]) =>
+  post<PrejimkaCsvPreview[]>('/truckmanager/order-check/prejimka-preview', { ...filters, orders })
+
+export type PrejimkaDestination = 'prejimky' | 'gpsdata' | 'wood' | 'wamm'
+export const sendPrejimkaCsv = (filters: OrderCheckFilters, preview: PrejimkaCsvPreview, destination: PrejimkaDestination, requestId: string) =>
+  post<{ success: true; number: number }>('/truckmanager/order-check/prejimka-send', {
+    ...filters, orderNumber: preview.orderNumber, gps1: preview.gps1, gps2: preview.gps2, destination, requestId,
+  })
 
 export const exportOrderCheck = async (filters: OrderCheckFilters): Promise<Blob> => {
   const r = await fetch(buildUrl('/truckmanager/order-check/export'), {

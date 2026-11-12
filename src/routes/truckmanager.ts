@@ -1,6 +1,10 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import ExcelJS from 'exceljs'
 import { getUserSql } from '../db/userSql.js'
+import { createPrejimkaCsv, PrejimkaEvent, PrejimkaPoint } from '../services/prejimkaCsv.js'
+import { createPrejimkaMail, PREJIMKA_RECIPIENTS, PrejimkaDestination, reservePrejimkaSend, updatePrejimkaSend } from '../services/prejimkaSend.js'
+import nodemailer from 'nodemailer'
+import { z } from 'zod'
 
 const ORDER_PREFIX_GROUPS: Record<string, string[]> = {
   wood: ['ZA', 'ZB', 'ZD', 'ZM', 'ZS', 'ZJ', 'MA'],
@@ -56,7 +60,7 @@ function parseOrderCheckFilters(q: OrderCheckFilters) {
   if (daySpan > 40) return { error: 'Rozsah může být maximálně 40 dní.' as const }
 
   const prefixGroup = q.prefixGroup ?? 'wood'
-  if (!ORDER_PREFIX_GROUPS[prefixGroup]) {
+  if (prefixGroup !== 'all' && !Object.hasOwn(ORDER_PREFIX_GROUPS, prefixGroup)) {
     return { error: 'Neplatná sada prefixů objednávek.' as const }
   }
 
@@ -75,7 +79,7 @@ function parseOrderCheckFilters(q: OrderCheckFilters) {
   return {
     from: from.toISOString().slice(0, 10),
     toExclusive,
-    prefixes: ORDER_PREFIX_GROUPS[prefixGroup],
+    prefixes: prefixGroup === 'all' ? [...new Set(Object.values(ORDER_PREFIX_GROUPS).flat())] : ORDER_PREFIX_GROUPS[prefixGroup],
     companyKey,
     carKey,
   }
@@ -103,6 +107,9 @@ async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: Parse
       ${filters.carKey ? sql`AND S.car_key = ${filters.carKey}` : sql``}
       ${filters.companyKey ? sql`AND C.company_key = ${filters.companyKey}` : sql``}
   `
+  const candidateRows = await candidates
+  const orderNumbers = [...new Set(candidateRows.map(row => String(row.order_number)))]
+  if (orderNumbers.length === 0) return []
 
   const [events, trackRows, sentRows] = await Promise.all([
     sql`
@@ -123,15 +130,14 @@ async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: Parse
       ORDER BY S.order_number, S.time ASC
     `,
     sql`
-      WITH order_candidates AS (${candidates})
-      , track_points AS (
+      WITH track_points AS (
         SELECT X.order_number, T.pos_gps, T.distance, T.time, T.pos_key,
                row_number() OVER (PARTITION BY X.order_number ORDER BY T.time, T.pos_key) AS point_number,
                count(*) OVER (PARTITION BY X.order_number) AS point_count
         FROM gps.tracking_order AS X
-        INNER JOIN (SELECT DISTINCT order_number FROM order_candidates) AS OC ON OC.order_number = X.order_number
         INNER JOIN gps.tracking_base AS T ON T.pos_key = X.pos_key
-        WHERE T.time >= ${bounds.start_at}::timestamptz
+        WHERE X.order_number = ANY(${orderNumbers}::text[])
+          AND T.time >= ${bounds.start_at}::timestamptz
           AND T.time < ${bounds.end_at}::timestamptz
           AND T.truck_status = 'M'
       )
@@ -237,6 +243,202 @@ async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: Parse
 }
 
 export async function truckmanagerRoutes(app: FastifyInstance) {
+
+  app.post('/order-check/prejimka-send', {
+    onRequest: [(app as any).authenticate],
+    bodyLimit: 10 * 1024 * 1024,
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const schema = z.object({
+      from: z.string(), to: z.string(), prefixGroup: z.string(),
+      companyKey: z.string(), carKey: z.string().optional(),
+      orderNumber: z.string().min(1).max(20).regex(/^[^;\r\n]+$/),
+      destination: z.enum(['prejimky', 'gpsdata', 'wood', 'wamm']),
+      gps1: z.string().min(1).max(1_000_000),
+      gps2: z.string().min(1).max(8_000_000),
+      requestId: z.string().uuid(),
+    })
+    const parsed = schema.safeParse(request.body)
+    if (!parsed.success) return reply.code(400).send({ error: 'Neplatné údaje pro odeslání.' })
+    const body = parsed.data
+    const filters = parseOrderCheckFilters(body)
+    if ('error' in filters) return reply.code(400).send({ error: filters.error })
+    if (!filters.companyKey) return reply.code(400).send({ error: 'Vyberte firmu.' })
+    const gps1Fields = body.gps1.split(';')
+    const gps2Header = body.gps2.split(/\r?\n/, 1)[0].split(';')
+    if (gps1Fields[0] !== body.orderNumber || gps1Fields[1] !== body.orderNumber ||
+        gps2Header.length !== 3 || gps2Header[0] !== 'H' || gps2Header[1] !== body.orderNumber || gps2Header[2] !== body.orderNumber) {
+      return reply.code(400).send({ error: 'Čísla zakázky v CSV neodpovídají vybrané zakázce.' })
+    }
+
+    const { userDb, passwordDb, smtpUser, smtpPass } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const [bounds] = await sql`
+        SELECT ${filters.from}::text::date::timestamptz AS start_at,
+               ${filters.toExclusive}::text::date::timestamptz AS end_at
+      `
+      const [candidate] = await sql`
+        SELECT S.car_key, CO.company, CO.id
+        FROM gps.service_base S
+        JOIN gps.car_base C ON C.car_key = S.car_key
+        JOIN provider.company CO ON CO.company_key = C.company_key
+        WHERE C.company_key = ${filters.companyKey}
+          AND S.order_number = ${body.orderNumber}
+          AND upper(substr(S.order_number, 1, 2)) = ANY(${filters.prefixes}::text[])
+          AND S.type = 'U'
+          AND S.time >= ${bounds.start_at}::timestamptz AND S.time < ${bounds.end_at}::timestamptz
+          ${filters.carKey ? sql`AND S.car_key = ${filters.carKey}` : sql``}
+        ORDER BY S.time DESC, S.service_key DESC LIMIT 1
+      `
+      if (!candidate) return reply.code(400).send({ error: 'Zakázka neodpovídá vybrané firmě nebo filtrům.' })
+
+      const [permissions] = await sql`
+        SELECT has_table_privilege(current_user, 'gps.wood_system_sent_log', 'INSERT') AS can_insert,
+               pg_get_serial_sequence('gps.wood_system_sent_log', 'log_id') AS sequence,
+               has_sequence_privilege(current_user, pg_get_serial_sequence('gps.wood_system_sent_log', 'log_id'), 'USAGE') AS sequence_usage,
+               has_sequence_privilege(current_user, pg_get_serial_sequence('gps.wood_system_sent_log', 'log_id'), 'UPDATE') AS sequence_update
+      `
+      if (!permissions.can_insert || !permissions.sequence || (!permissions.sequence_usage && !permissions.sequence_update)) {
+        return reply.code(403).send({ error: 'Chybí oprávnění k záznamu odeslání. E-mail nebyl odeslán.' })
+      }
+
+      const number = reservePrejimkaSend(body.requestId)
+      if (number === null) return reply.code(409).send({ error: 'Tento požadavek již byl zpracován nebo jeho výsledek není znám. Před opakováním ověřte odeslání.' })
+      const mail = createPrejimkaMail(number, candidate.company, candidate.id ?? '', body.destination as PrejimkaDestination, body.gps1, body.gps2)
+      const transport = nodemailer.createTransport({
+        host: process.env.SMTP_HOST ?? 'nweb.euro-sped.cz',
+        port: Number(process.env.SMTP_PORT ?? 25),
+        secure: false,
+        ignoreTLS: true,
+        auth: smtpUser ? { user: smtpUser, pass: smtpPass } : undefined,
+      })
+      try {
+        await transport.sendMail(mail)
+      } catch (error) {
+        updatePrejimkaSend(body.requestId, 'failed')
+        request.log.error({ err: error, requestId: body.requestId }, 'Přejímka SMTP send failed')
+        return reply.code(502).send({ error: 'Odeslání SMTP selhalo nebo jeho výsledek není znám. Před opakováním ověřte doručení.' })
+      } finally {
+        transport.close()
+      }
+      const suffix = String(number).padStart(4, '0')
+      try {
+        await sql`
+          INSERT INTO gps.wood_system_sent_log (company_key, intent, file_name, sent_time, car_key, sent_to, sent_manually)
+          VALUES
+            (${filters.companyKey}, ${body.orderNumber}, ${`gps1-${suffix}.csv`}, current_timestamp, ${candidate.car_key}, ${PREJIMKA_RECIPIENTS[body.destination].email}, true),
+            (${filters.companyKey}, ${body.orderNumber}, ${`gps2-${suffix}.csv`}, current_timestamp, ${candidate.car_key}, ${PREJIMKA_RECIPIENTS[body.destination].email}, true)
+        `
+      } catch (error) {
+        request.log.error({ err: error, requestId: body.requestId, orderNumber: body.orderNumber }, 'Přejímka sent but log failed')
+        try {
+          updatePrejimkaSend(body.requestId, 'log_failed')
+        } catch (statusError) {
+          request.log.error({ err: statusError, requestId: body.requestId }, 'Přejímka local status update failed')
+        }
+        return reply.code(500).send({ error: `E-mail se zakázkou ${body.orderNumber} byl přijat SMTP serverem, ale nepodařilo se uložit záznam o odeslání. Neposílejte jej znovu.` })
+      }
+      try {
+        updatePrejimkaSend(body.requestId, 'sent')
+      } catch (error) {
+        request.log.error({ err: error, requestId: body.requestId }, 'Přejímka sent but local status update failed')
+        return reply.code(500).send({ error: 'E-mail byl přijat SMTP serverem a zaznamenán, ale nepodařilo se uložit místní stav. Neposílejte jej znovu.' })
+      }
+      return reply.send({ success: true, number })
+    } finally {
+      await sql.end()
+    }
+  })
+
+  app.post('/order-check/prejimka-preview', {
+    onRequest: [(app as any).authenticate],
+  }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = request.body as OrderCheckFilters & { orders?: unknown }
+    const filters = parseOrderCheckFilters(body ?? {})
+    if ('error' in filters) return reply.code(400).send({ error: filters.error })
+    if (!filters.companyKey || !Array.isArray(body.orders) || body.orders.length === 0 ||
+      body.orders.some(order => typeof order !== 'string' || !order.trim() || /[;\r\n]/.test(order))) {
+      return reply.code(400).send({ error: 'Vyberte firmu a platné zakázky pro přípravu CSV.' })
+    }
+    const orders = [...new Set<string>(body.orders)]
+    const { userDb, passwordDb } = (request as any).user
+    const sql = getUserSql(userDb, passwordDb)
+    try {
+      const [bounds] = await sql`
+        SELECT ${filters.from}::text::date::timestamptz AS start_at,
+               ${filters.toExclusive}::text::date::timestamptz AS end_at
+      `
+      const candidates = await sql`
+        SELECT DISTINCT S.order_number
+        FROM gps.service_base S
+        JOIN gps.car_base C ON C.car_key = S.car_key
+        WHERE C.company_key = ${filters.companyKey}
+          AND S.order_number = ANY(${orders}::text[])
+          AND upper(substr(S.order_number, 1, 2)) = ANY(${filters.prefixes}::text[])
+          AND S.type = 'U'
+          AND S.time >= ${bounds.start_at}::timestamptz AND S.time < ${bounds.end_at}::timestamptz
+          ${filters.carKey ? sql`AND S.car_key = ${filters.carKey}` : sql``}
+      `
+      if (candidates.length !== orders.length) {
+        return reply.code(400).send({ error: 'Některé zakázky neodpovídají vybrané firmě nebo filtrům. Načtěte výsledky znovu.' })
+      }
+      const events = await sql`
+        SELECT S.order_number, S.type, to_char(S.time, 'YYYY-MM-DD HH24:MI') AS time,
+               S.pos_gps::text AS position, C.spz
+        FROM gps.service_base S
+        JOIN gps.car_base C ON C.car_key = S.car_key
+        WHERE C.company_key = ${filters.companyKey}
+          AND S.order_number = ANY(${orders}::text[])
+          AND S.type IN ('L', 'U')
+          AND S.time >= ${bounds.start_at}::timestamptz AND S.time < ${bounds.end_at}::timestamptz
+        ORDER BY S.order_number, S.time, S.service_key
+      `
+      const points = await sql`
+        SELECT X.order_number, to_char(T.time, 'YYYY-MM-DD HH24:MI') AS time,
+               T.pos_gps::text AS position,
+               sum(coalesce(T.distance, 0)::numeric) OVER (PARTITION BY X.order_number)::text AS distance
+        FROM gps.tracking_order X
+        JOIN gps.tracking_base T ON T.pos_key = X.pos_key
+        JOIN gps.car_base C ON C.car_key = T.car_key
+        WHERE C.company_key = ${filters.companyKey}
+          AND X.order_number = ANY(${orders}::text[])
+          AND T.time >= ${bounds.start_at}::timestamptz AND T.time < ${bounds.end_at}::timestamptz
+          AND T.truck_status = 'M'
+        ORDER BY X.order_number, T.time, T.pos_key
+      `
+      const eventsByOrder = new Map<string, PrejimkaEvent[]>()
+      const pointsByOrder = new Map<string, (PrejimkaPoint & { distance: string })[]>()
+      for (const event of events) {
+        const order = String(event.order_number)
+        const list = eventsByOrder.get(order) ?? []
+        list.push({ type: event.type, time: event.time, position: event.position, spz: event.spz })
+        eventsByOrder.set(order, list)
+      }
+      for (const point of points) {
+        const order = String(point.order_number)
+        const list = pointsByOrder.get(order) ?? []
+        list.push({ time: point.time, position: point.position, distance: point.distance })
+        pointsByOrder.set(order, list)
+      }
+      const results = orders.map(orderNumber => {
+        const orderEvents = eventsByOrder.get(orderNumber) ?? []
+        const orderPoints = pointsByOrder.get(orderNumber) ?? []
+        const distance = orderPoints[0]?.distance ?? '0'
+        try {
+          return {
+            orderNumber,
+            pointCount: orderPoints.length,
+            ...createPrejimkaCsv(orderNumber, orderEvents, orderPoints, distance),
+          }
+        } catch (error) {
+          throw new Error(`Zakázka ${orderNumber}: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      })
+      return reply.send(results)
+    } finally {
+      await sql.end()
+    }
+  })
 
   // GET /api/truckmanager/order-check/options
   app.get('/order-check/options', {
