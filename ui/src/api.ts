@@ -621,7 +621,7 @@ export const getImportCars = (companyKey: number, importType: string) =>
 export type OrderCheckFilters = {
   from: string
   to: string
-  prefixGroup: 'wood' | 'gps'
+  prefixGroup: 'wood' | 'gps' | 'mm'
   companyKey?: string
   carKey?: string
 }
@@ -651,6 +651,15 @@ export type OrderCheckRow = {
   distance: number
   events: OrderCheckEvent[]
   coordinates: string[]
+  sentFiles?: {
+    company: string | null
+    fileName: string | null
+    createdTime: string | null
+    sentTime: string | null
+    confirmedTime: string | null
+    sentTo: string | null
+    sentManually: boolean | null
+  }[]
 }
 
 export type OrderCheckOptions = {

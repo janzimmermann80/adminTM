@@ -38,43 +38,10 @@ const mapUrl = (coordinates: string[]) => {
   return `https://www.google.com/maps/dir/?${params.toString()}`
 }
 
-const RoutePreview = ({ coordinates }: { coordinates: string[] }) => {
-  const sampled = coordinates.length > 250
-    ? Array.from({ length: 250 }, (_, index) => coordinates[Math.round(index * (coordinates.length - 1) / 249)])
-    : coordinates
-  const points = sampled.map(value => value.split(',').map(Number))
-    .filter(([lat, lng]) => Number.isFinite(lat) && Number.isFinite(lng))
-  if (points.length < 2) return null
-
-  const latitudes = points.map(([lat]) => lat)
-  const longitudes = points.map(([, lng]) => lng)
-  const minLat = Math.min(...latitudes)
-  const maxLat = Math.max(...latitudes)
-  const minLng = Math.min(...longitudes)
-  const maxLng = Math.max(...longitudes)
-  const xSpan = maxLng - minLng || 1
-  const ySpan = maxLat - minLat || 1
-  const path = points.map(([lat, lng]) => {
-    const x = 4 + ((lng - minLng) / xSpan) * 152
-    const y = 36 - ((lat - minLat) / ySpan) * 30
-    return `${x},${y}`
-  }).join(' ')
-  const start = path.split(' ')[0].split(',')
-  const end = path.split(' ')[path.split(' ').length - 1].split(',')
-
-  return (
-    <svg viewBox="0 0 160 40" className="w-40 h-10" role="img" aria-label="Záznam GPS trasy">
-      <polyline points={path} fill="none" stroke="#0d8080" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={start[0]} cy={start[1]} r="2.5" fill="#16a34a" />
-      <circle cx={end[0]} cy={end[1]} r="2.5" fill="#dc2626" />
-    </svg>
-  )
-}
-
 const buildFilters = (
   from: string,
   to: string,
-  prefixGroup: 'wood' | 'gps',
+  prefixGroup: OrderCheckFilters['prefixGroup'],
   companyKey: string,
   carKey: string,
 ): OrderCheckFilters => ({
@@ -109,11 +76,28 @@ const OrderRow = ({ row, index }: { row: OrderCheckRow; index: number }) => {
       </td>
       <td className="px-3 py-3 whitespace-nowrap">
         {routeUrl
-          ? <div>
-            <RoutePreview coordinates={row.coordinates} />
-            <a href={routeUrl} target="_blank" rel="noopener noreferrer" className="text-teal-700 hover:underline">Otevřít v Google Maps</a>
-          </div>
+          ? <a href={routeUrl} target="_blank" rel="noopener noreferrer" className="text-teal-700 hover:underline">Trasa</a>
           : <span className="text-gray-400">Bez GPS trasy</span>}
+      </td>
+      <td className="px-3 py-3 min-w-64">
+        {!row.sentFiles
+          ? <span className="text-red-700">Údaj není dostupný. Aktualizujte API.</span>
+          : row.sentFiles.length === 0
+          ? <span className="text-gray-400">Žádný záznam</span>
+          : <div className="space-y-2">
+            {row.sentFiles.map((file, fileIndex) => (
+              <div key={fileIndex} className="text-xs text-gray-700">
+                <div className="font-medium">
+                  {file.sentTime ? formatDateTime(file.sentTime) : 'Bez času odeslání'}
+                  {file.sentManually ? ' · ručně' : ''}
+                </div>
+                <div>{file.company ?? 'Neznámá firma'} · {file.fileName ?? 'Bez názvu souboru'}</div>
+                {file.createdTime && <div>Vytvořeno: {formatDateTime(file.createdTime)}</div>}
+                {file.sentTo && <div>Cíl: {file.sentTo}</div>}
+                {file.confirmedTime && <div>Potvrzeno: {formatDateTime(file.confirmedTime)}</div>}
+              </div>
+            ))}
+          </div>}
       </td>
     </tr>
   )
@@ -125,7 +109,7 @@ export const OrderCheck = () => {
   lastWeek.setDate(lastWeek.getDate() - 7)
   const [from, setFrom] = useState(toDateInput(lastWeek))
   const [to, setTo] = useState(today)
-  const [prefixGroup, setPrefixGroup] = useState<'wood' | 'gps'>('wood')
+  const [prefixGroup, setPrefixGroup] = useState<OrderCheckFilters['prefixGroup']>('wood')
   const [companyKey, setCompanyKey] = useState('')
   const [carKey, setCarKey] = useState('')
   const [options, setOptions] = useState<OrderCheckOptions | null>(null)
@@ -148,6 +132,32 @@ export const OrderCheck = () => {
     () => options?.cars.filter(car => !companyKey || String(car.company_key) === companyKey) ?? [],
     [companyKey, options],
   )
+
+  const groupedRows = useMemo(() => {
+    const groups = new Map<string, { company: string | null; rows: OrderCheckRow[] }>()
+    for (const row of rows ?? []) {
+      const key = row.companyKey !== null ? `key:${row.companyKey}` : `name:${row.company ?? ''}`
+      let group = groups.get(key)
+      if (!group) {
+        group = { company: row.company, rows: [] }
+        groups.set(key, group)
+      }
+      group.rows.push(row)
+    }
+
+    let offset = 0
+    return Array.from(groups.entries())
+      .sort(([, a], [, b]) => {
+        if (!a.company) return b.company ? 1 : 0
+        if (!b.company) return -1
+        return a.company.localeCompare(b.company, 'cs')
+      })
+      .map(([key, group]) => {
+        const start = offset
+        offset += group.rows.length
+        return { key, ...group, start }
+      })
+  }, [rows])
 
   const filters = () => buildFilters(from, to, prefixGroup, companyKey, carKey)
 
@@ -223,10 +233,11 @@ export const OrderCheck = () => {
             </label>
             <label className="text-sm text-gray-600">
               Sada prefixů
-              <select value={prefixGroup} onChange={e => setPrefixGroup(e.target.value as 'wood' | 'gps')}
+              <select value={prefixGroup} onChange={e => setPrefixGroup(e.target.value as OrderCheckFilters['prefixGroup'])}
                 className="mt-1 block w-full rounded border border-gray-300 bg-white px-2.5 py-2 text-sm">
                 <option value="wood">ZA, ZB, ZD, ZM, ZS, ZJ, MA</option>
                 <option value="gps">LC, LD</option>
+                <option value="mm">MM</option>
               </select>
             </label>
             <label className="text-sm text-gray-600">
@@ -284,9 +295,19 @@ export const OrderCheck = () => {
                       <th className="px-3 py-2 text-right">Km</th>
                       <th className="px-3 py-2">Pozice</th>
                       <th className="px-3 py-2">Trasa</th>
+                      <th className="px-3 py-2" title="Čas zaznamenaného odeslání souboru; nemusí znamenat doručení">Odesláno</th>
                     </tr>
                   </thead>
-                  <tbody>{rows.map((row, index) => <OrderRow key={row.orderNumber} row={row} index={index} />)}</tbody>
+                  {groupedRows.map(group => (
+                    <tbody key={group.key}>
+                      <tr className="bg-teal-50 border-t border-teal-100">
+                        <th scope="rowgroup" colSpan={9} className="px-3 py-2 text-left font-semibold text-teal-900">
+                          {group.company ?? 'Neznámá firma'} <span className="font-normal text-teal-700">({group.rows.length})</span>
+                        </th>
+                      </tr>
+                      {group.rows.map((row, index) => <OrderRow key={row.orderNumber} row={row} index={group.start + index} />)}
+                    </tbody>
+                  ))}
                 </table>
               </div>}
           </section>

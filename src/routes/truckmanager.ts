@@ -5,6 +5,7 @@ import { getUserSql } from '../db/userSql.js'
 const ORDER_PREFIX_GROUPS: Record<string, string[]> = {
   wood: ['ZA', 'ZB', 'ZD', 'ZM', 'ZS', 'ZJ', 'MA'],
   gps: ['LC', 'LD'],
+  mm: ['MM'],
 }
 
 type OrderCheckFilters = {
@@ -81,24 +82,29 @@ function parseOrderCheckFilters(q: OrderCheckFilters) {
 }
 
 async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: ParsedOrderCheckFilters) {
+  // Resolve local midnight first so timestamp parameters enable pruning without shifting the date.
+  const [bounds] = await sql`
+    SELECT ${filters.from}::text::date::timestamptz AS start_at,
+           ${filters.toExclusive}::text::date::timestamptz AS end_at
+  `
   const prefixCondition = filters.prefixes.slice(1).reduce(
     (condition, prefix) => sql`${condition} OR upper(substr(S.order_number, 1, 2)) = ${prefix}`,
     sql`upper(substr(S.order_number, 1, 2)) = ${filters.prefixes[0]}`,
   )
   const candidates = sql`
-    SELECT DISTINCT S.order_number
+    SELECT DISTINCT S.order_number, C.company_key
     FROM gps.service_base AS S
     LEFT JOIN gps.car_base AS C ON S.car_key = C.car_key
     WHERE S.order_number IS NOT NULL
       AND S.type = 'U'
-      AND S.time >= ${filters.from}::date
-      AND S.time < ${filters.toExclusive}::date
+      AND S.time >= ${bounds.start_at}::timestamptz
+      AND S.time < ${bounds.end_at}::timestamptz
       AND (${prefixCondition})
       ${filters.carKey ? sql`AND S.car_key = ${filters.carKey}` : sql``}
       ${filters.companyKey ? sql`AND C.company_key = ${filters.companyKey}` : sql``}
   `
 
-  const [events, trackRows] = await Promise.all([
+  const [events, trackRows, sentRows] = await Promise.all([
     sql`
       WITH order_candidates AS (${candidates})
       SELECT S.time, S.type, S.pos_gps, S.order_number, S.car_key,
@@ -106,13 +112,13 @@ async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: Parse
              MC.name AS city_name, MC.zip, MC.country,
              D.name AS driver_name
       FROM gps.service_base AS S
-      INNER JOIN order_candidates AS OC ON OC.order_number = S.order_number
+      INNER JOIN (SELECT DISTINCT order_number FROM order_candidates) AS OC ON OC.order_number = S.order_number
       LEFT JOIN gps.car_base AS C ON S.car_key = C.car_key
       LEFT JOIN provider.company AS CO ON C.company_key = CO.company_key
       LEFT JOIN map.city AS MC ON S.city_key = MC.city_key
       LEFT JOIN gps.driver_base AS D ON S.driver_key = D.driver_key
-      WHERE S.time >= ${filters.from}::date
-        AND S.time < ${filters.toExclusive}::date
+      WHERE S.time >= ${bounds.start_at}::timestamptz
+        AND S.time < ${bounds.end_at}::timestamptz
         AND S.type IN ('L', 'U')
       ORDER BY S.order_number, S.time ASC
     `,
@@ -123,10 +129,10 @@ async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: Parse
                row_number() OVER (PARTITION BY X.order_number ORDER BY T.time, T.pos_key) AS point_number,
                count(*) OVER (PARTITION BY X.order_number) AS point_count
         FROM gps.tracking_order AS X
-        INNER JOIN order_candidates AS OC ON OC.order_number = X.order_number
-        INNER JOIN gps.tracking AS T ON T.pos_key = X.pos_key
-        WHERE T.time >= ${filters.from}::date
-          AND T.time < ${filters.toExclusive}::date
+        INNER JOIN (SELECT DISTINCT order_number FROM order_candidates) AS OC ON OC.order_number = X.order_number
+        INNER JOIN gps.tracking_base AS T ON T.pos_key = X.pos_key
+        WHERE T.time >= ${bounds.start_at}::timestamptz
+          AND T.time < ${bounds.end_at}::timestamptz
           AND T.truck_status = 'M'
       )
       SELECT order_number,
@@ -138,6 +144,16 @@ async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: Parse
              ) AS coordinates
       FROM track_points
       GROUP BY order_number
+    `,
+    sql`
+      WITH order_candidates AS (${candidates})
+      SELECT OC.order_number, CO.company, L.file_name, L.created_time,
+             L.sent_time, L.confirmed_time, L.sent_to, L.sent_manually
+      FROM order_candidates AS OC
+      INNER JOIN gps.wood_system_sent_log AS L
+        ON upper(L.intent) = upper(OC.order_number) AND L.company_key = OC.company_key
+      LEFT JOIN provider.company AS CO ON CO.company_key = L.company_key
+      ORDER BY L.created_time DESC, L.sent_time DESC, L.file_name
     `,
   ])
 
@@ -151,6 +167,15 @@ async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: Parse
     distance: number
     events: OrderCheckEvent[]
     coordinates: string[]
+    sentFiles: {
+      company: string | null
+      fileName: string | null
+      createdTime: string | null
+      sentTime: string | null
+      confirmedTime: string | null
+      sentTo: string | null
+      sentManually: boolean | null
+    }[]
   }>()
 
   for (const event of events) {
@@ -167,6 +192,7 @@ async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: Parse
         distance: 0,
         events: [],
         coordinates: [],
+        sentFiles: [],
       }
       byOrder.set(key, order)
     }
@@ -188,6 +214,23 @@ async function loadOrderCheck(sql: ReturnType<typeof getUserSql>, filters: Parse
       }
     }
     order.distance = Number(point.distance ?? 0)
+  }
+
+  const timestamp = (value: unknown) =>
+    value instanceof Date ? value.toISOString() : value == null ? null : String(value)
+
+  for (const sent of sentRows) {
+    const order = byOrder.get(String(sent.order_number))
+    if (!order) continue
+    order.sentFiles.push({
+      company: sent.company ?? null,
+      fileName: sent.file_name ?? null,
+      createdTime: timestamp(sent.created_time),
+      sentTime: timestamp(sent.sent_time),
+      confirmedTime: timestamp(sent.confirmed_time),
+      sentTo: sent.sent_to ?? null,
+      sentManually: sent.sent_manually ?? null,
+    })
   }
 
   return Array.from(byOrder.values()).sort((a, b) => a.orderNumber.localeCompare(b.orderNumber))
@@ -263,6 +306,7 @@ export async function truckmanagerRoutes(app: FastifyInstance) {
         { header: 'Zakázka', key: 'order', width: 20 },
         { header: 'Km', key: 'distance', width: 12 },
         { header: 'Pozice', key: 'events', width: 70 },
+        { header: 'Odesláno', key: 'sent', width: 70 },
       ]
       rows.forEach((row, index) => {
         sheet.addRow({
@@ -275,6 +319,11 @@ export async function truckmanagerRoutes(app: FastifyInstance) {
           events: row.events.map(event =>
             `${event.type === 'L' ? 'Nakl.' : 'Vykl.'} ${event.city_name ?? ''}, ${event.zip ?? ''} ${event.country ?? ''} ${event.time}`,
           ).join('\n'),
+          sent: row.sentFiles.length
+            ? row.sentFiles.map(file =>
+              `${file.company ?? 'Neznámá firma'} | ${file.fileName ?? 'Bez názvu souboru'}${file.createdTime ? ` | Vytvořeno: ${file.createdTime}` : ''} | ${file.sentTime ? `Odesláno: ${file.sentTime}` : 'Bez času odeslání'}${file.sentTo ? ` | Cíl: ${file.sentTo}` : ''}${file.confirmedTime ? ` | Potvrzeno: ${file.confirmedTime}` : ''}${file.sentManually ? ' | Ručně' : ''}`,
+            ).join('\n')
+            : 'Žádný záznam',
         })
       })
       sheet.getRow(1).font = { bold: true }
