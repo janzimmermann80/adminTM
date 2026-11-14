@@ -465,7 +465,11 @@ export async function truckmanagerRoutes(app: FastifyInstance) {
           ORDER BY C.company, CB.spz
         `,
       ])
-      return reply.send({ companies, cars })
+      const destinations = Object.entries(PREJIMKA_RECIPIENTS).map(([value, destination]) => ({
+        value,
+        ...destination,
+      }))
+      return reply.send({ companies, cars, destinations })
     } finally {
       await sql.end()
     }

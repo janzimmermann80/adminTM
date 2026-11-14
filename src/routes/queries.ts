@@ -266,6 +266,18 @@ export async function queriesRoutes(app: FastifyInstance) {
           sum(E.price) FILTER (WHERE E.type = 'openai-pdf')::numeric AS openai_pdf_usd,
           count(*) FILTER (WHERE E.type = 'openai-asistent')::int AS openai_asistent,
           sum(E.price) FILTER (WHERE E.type = 'openai-asistent')::numeric AS openai_asistent_usd,
+          count(*) FILTER (
+            WHERE E.type = 'timocom' AND E.domain = 'https://api.timocom.com'
+              AND E.descr LIKE 'radar:%' AND E.price IS NULL
+          )::int AS timocom_radar,
+          count(*) FILTER (
+            WHERE E.type = 'timocom' AND E.domain = 'https://api.timocom.com'
+              AND E.descr LIKE 'tabule:%' AND E.price IS NULL
+          )::int AS timocom_tabule,
+          count(*) FILTER (
+            WHERE E.type = 'timocom' AND E.domain = 'https://api.timocom.com'
+              AND E.descr LIKE 'asistent:%' AND E.price IS NULL
+          )::int AS timocom_asistent,
           count(*) FILTER (WHERE E.type = 'place-details')::int AS place_details,
           sum(E.price) FILTER (WHERE E.type = 'place-details')::numeric AS place_details_usd,
           count(*) FILTER (WHERE E.type = 'openai-disponent')::int AS openai_disponent,
@@ -301,6 +313,12 @@ export async function queriesRoutes(app: FastifyInstance) {
         openai_pdf_czk: czk(r.openai_pdf_usd),
         openai_asistent: r.openai_asistent,
         openai_asistent_czk: czk(r.openai_asistent_usd),
+        timocom_radar: r.timocom_radar,
+        timocom_radar_czk: 0,
+        timocom_tabule: r.timocom_tabule,
+        timocom_tabule_czk: 0,
+        timocom_asistent: r.timocom_asistent,
+        timocom_asistent_czk: 0,
         place_details: r.place_details,
         place_details_czk: czk(r.place_details_usd),
         tollguru_route_cost: r.tollguru_route_cost,

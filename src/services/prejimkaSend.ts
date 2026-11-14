@@ -4,10 +4,10 @@ import { dirname, resolve } from 'node:path'
 import type { SendMailOptions } from 'nodemailer'
 
 export const PREJIMKA_RECIPIENTS = {
-  prejimky: { label: 'Nezávislá Přejímka', email: 'gps@prejimky.cz' },
-  gpsdata: { label: 'LESS & TIMBER', email: 'prejimky@gpsdata.cz' },
-  wood: { label: 'WOOD & PAPER', email: 'gps@wood-paper.cz' },
-  wamm: { label: 'WA-MM', email: 'gps@wa-mm.cz' },
+  prejimky: { prefixes: ['SB', 'SY', 'SS', 'SZ', 'SL', 'SP', 'SM'], label: 'Nezávislá Přejímka', email: 'gps@prejimky.cz' },
+  gpsdata: { prefixes: ['LC', 'LD'], label: 'LESS & TIMBER', email: 'prejimky@gpsdata.cz' },
+  wood: { prefixes: ['ZA', 'ZB', 'ZD', 'ZM', 'ZS', 'ZJ', 'ZE', 'MA', 'LW'], label: 'WOOD & PAPER', email: 'gps@wood-paper.cz' },
+  wamm: { prefixes: ['MM'], label: 'WA-MM', email: 'gps@wa-mm.cz' },
 } as const
 
 export type PrejimkaDestination = keyof typeof PREJIMKA_RECIPIENTS

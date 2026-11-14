@@ -536,6 +536,12 @@ export type ApiRequestsByCompanyRow = {
   openai_pdf_czk: number
   openai_asistent: number
   openai_asistent_czk: number
+  timocom_radar: number
+  timocom_radar_czk: number
+  timocom_tabule: number
+  timocom_tabule_czk: number
+  timocom_asistent: number
+  timocom_asistent_czk: number
   place_details: number
   place_details_czk: number
   tollguru_route_cost: number
@@ -665,6 +671,12 @@ export type OrderCheckRow = {
 export type OrderCheckOptions = {
   companies: { company_key: number; company: string }[]
   cars: { car_key: number; company_key: number; spz: string; company: string }[]
+  destinations: {
+    value: PrejimkaDestination
+    prefixes: readonly string[]
+    label: string
+    email: string
+  }[]
 }
 
 export const getOrderCheckOptions = () => get<OrderCheckOptions>('/truckmanager/order-check/options')

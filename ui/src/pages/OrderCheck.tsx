@@ -234,7 +234,7 @@ export const OrderCheck = () => {
   return (
     <Layout>
       {companyModal !== null && <CompanyDetailModal companyKey={String(companyModal)} onClose={() => setCompanyModal(null)} />}
-      {csvCompany && <PrejimkaCsvModal {...csvCompany} onSent={() => setCsvSent(true)} onClose={() => {
+      {csvCompany && <PrejimkaCsvModal {...csvCompany} destinations={options?.destinations ?? []} onSent={() => setCsvSent(true)} onClose={() => {
         setCsvCompany(null)
         if (csvSent) {
           setCsvSent(false)

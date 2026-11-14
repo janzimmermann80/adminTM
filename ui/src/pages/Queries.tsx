@@ -619,6 +619,9 @@ const ARBC_COLS: { key: keyof ApiRequestsByCompanyRow; czk: keyof ApiRequestsByC
   { key: 'openai_pdf',          czk: 'openai_pdf_czk',          label: 'openai-pdf' },
   { key: 'openai_asistent',     czk: 'openai_asistent_czk',     label: 'AI asistent' },
   { key: 'openai_disponent',    czk: 'openai_disponent_czk',    label: 'AI disponent' },
+  { key: 'timocom_radar',       czk: 'timocom_radar_czk',       label: 'TIMOCOM radar' },
+  { key: 'timocom_tabule',      czk: 'timocom_tabule_czk',      label: 'TIMOCOM tabule' },
+  { key: 'timocom_asistent',    czk: 'timocom_asistent_czk',    label: 'TIMOCOM asistent' },
   { key: 'here_route_cost',     czk: 'here_route_cost_czk',     label: 'here-route-cost' },
 ]
 

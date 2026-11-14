@@ -16,6 +16,18 @@ test('preserves recipient, subject and both CSV attachments', async () => {
   assert.match(message, /Z3BzQHdhLW1tLmN6|gps@wa-mm\.cz/i)
 })
 
+test('maps each legacy order prefix to its email recipient', () => {
+  const expectedPrefixes = {
+    prejimky: ['SB', 'SY', 'SS', 'SZ', 'SL', 'SP', 'SM'],
+    gpsdata: ['LC', 'LD'],
+    wood: ['ZA', 'ZB', 'ZD', 'ZM', 'ZS', 'ZJ', 'ZE', 'MA', 'LW'],
+    wamm: ['MM'],
+  }
+  for (const [destination, prefixes] of Object.entries(expectedPrefixes)) {
+    assert.deepEqual(PREJIMKA_RECIPIENTS[destination as keyof typeof PREJIMKA_RECIPIENTS].prefixes, prefixes)
+  }
+})
+
 test('allocates consecutive numbers and prevents duplicate request IDs', () => {
   process.env.PREJIMKA_DB_PATH = ':memory:'
   assert.equal(reservePrejimkaSend('first'), 1)

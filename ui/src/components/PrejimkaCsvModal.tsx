@@ -6,15 +6,21 @@ type Props = {
   companyKey: number
   rows: OrderCheckRow[]
   filters: OrderCheckFilters
+  destinations: {
+    value: PrejimkaDestination
+    prefixes: readonly string[]
+    label: string
+    email: string
+  }[]
   onClose: () => void
   onSent: () => void
 }
 
-const destinations: { value: PrejimkaDestination; label: string; email: string }[] = [
-  { value: 'prejimky', label: 'Nezávislá Přejímka', email: 'gps@prejimky.cz' },
-  { value: 'gpsdata', label: 'LESS & TIMBER', email: 'prejimky@gpsdata.cz' },
-  { value: 'wood', label: 'WOOD & PAPER', email: 'gps@wood-paper.cz' },
-  { value: 'wamm', label: 'WA-MM', email: 'gps@wa-mm.cz' },
+const fallbackDestinations: Props['destinations'] = [
+  { value: 'prejimky', prefixes: ['SB', 'SY', 'SS', 'SZ', 'SL', 'SP', 'SM'], label: 'Nezávislá Přejímka', email: 'gps@prejimky.cz' },
+  { value: 'gpsdata', prefixes: ['LC', 'LD'], label: 'LESS & TIMBER', email: 'prejimky@gpsdata.cz' },
+  { value: 'wood', prefixes: ['ZA', 'ZB', 'ZD', 'ZM', 'ZS', 'ZJ', 'ZE', 'MA', 'LW'], label: 'WOOD & PAPER', email: 'gps@wood-paper.cz' },
+  { value: 'wamm', prefixes: ['MM'], label: 'WA-MM', email: 'gps@wa-mm.cz' },
 ]
 
 function downloadCsv(name: string, text: string) {
@@ -26,12 +32,13 @@ function downloadCsv(name: string, text: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
-export function PrejimkaCsvModal({ company, companyKey, rows, filters, onClose, onSent }: Props) {
+export function PrejimkaCsvModal({ company, companyKey, rows, filters, destinations, onClose, onSent }: Props) {
+  const recipientOptions = destinations.length ? destinations : fallbackDestinations
   const [selected, setSelected] = useState(() => new Set(rows.map(row => row.orderNumber)))
   const [previews, setPreviews] = useState<PrejimkaCsvPreview[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [destination, setDestination] = useState<PrejimkaDestination>('prejimky')
+  const [destinationsByOrder, setDestinationsByOrder] = useState<Record<string, PrejimkaDestination | ''>>({})
   const [sending, setSending] = useState<string | null>(null)
   const [sendResults, setSendResults] = useState<Record<string, { ok: boolean; message: string }>>({})
 
@@ -43,7 +50,12 @@ export function PrejimkaCsvModal({ company, companyKey, rows, filters, onClose, 
     setError(null)
     setLoading(true)
     try {
-      setPreviews(await preparePrejimkaCsv({ ...filters, companyKey: String(companyKey) }, [...selected]))
+      const prepared = await preparePrejimkaCsv({ ...filters, companyKey: String(companyKey) }, [...selected])
+      setPreviews(prepared)
+      setDestinationsByOrder(Object.fromEntries(prepared.map(preview => {
+        const prefix = preview.orderNumber.slice(0, 2).toUpperCase()
+        return [preview.orderNumber, recipientOptions.find(destination => destination.prefixes.includes(prefix))?.value ?? '']
+      })))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -56,7 +68,12 @@ export function PrejimkaCsvModal({ company, companyKey, rows, filters, onClose, 
   }
 
   const send = async (preview: PrejimkaCsvPreview) => {
-    const recipient = destinations.find(item => item.value === destination)!
+    const destination = destinationsByOrder[preview.orderNumber]
+    const recipient = recipientOptions.find(item => item.value === destination)
+    if (!destination || !recipient) {
+      setError(`Pro prefix zakázky ${preview.orderNumber.slice(0, 2)} není nastavený příjemce.`)
+      return
+    }
     if (!window.confirm(`Odeslat zakázku ${preview.orderNumber} firmy ${company} na ${recipient.label} (${recipient.email})?`)) return
     setSending(preview.orderNumber)
     try {
@@ -107,12 +124,6 @@ export function PrejimkaCsvModal({ company, companyKey, rows, filters, onClose, 
         ) : (
           <>
             <button type="button" onClick={() => setPreviews(null)} disabled={sending !== null} className="mt-4 text-sm text-teal-700 hover:underline disabled:opacity-50">Zpět k výběru</button>
-            <label className="mt-4 block text-sm font-medium">Příjemce
-              <select value={destination} onChange={e => setDestination(e.target.value as PrejimkaDestination)} disabled={sending !== null}
-                className="mt-1 block w-full rounded border border-gray-300 p-2 text-sm">
-                {destinations.map(item => <option key={item.value} value={item.value}>{item.label} – {item.email}</option>)}
-              </select>
-            </label>
             <div className="mt-4 space-y-6">
               {previews.map((preview, index) => {
                 const safeOrder = preview.orderNumber.replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -120,6 +131,15 @@ export function PrejimkaCsvModal({ company, companyKey, rows, filters, onClose, 
                   <section key={preview.orderNumber} className="rounded border border-gray-200 p-4">
                     <h3 className="font-semibold">{preview.orderNumber}</h3>
                     <p className="text-xs text-gray-500">{preview.pointCount.toLocaleString('cs-CZ')} GPS bodů{preview.pointCount === 0 && ' – trasa nebyla nalezena'}</p>
+                    <label className="mt-3 block text-sm font-medium">Příjemce
+                      <select value={destinationsByOrder[preview.orderNumber] ?? ''}
+                        onChange={e => setDestinationsByOrder(current => ({ ...current, [preview.orderNumber]: e.target.value as PrejimkaDestination | '' }))}
+                        disabled={sending !== null || !!sendResults[preview.orderNumber]}
+                        className="mt-1 block w-full rounded border border-gray-300 p-2 text-sm">
+                        <option value="">Vyberte příjemce</option>
+                        {recipientOptions.map(item => <option key={item.value} value={item.value}>{item.prefixes.join(', ')} – {item.label} – {item.email}</option>)}
+                      </select>
+                    </label>
                     {(['gps1', 'gps2'] as const).map(field => (
                       <div key={field} className="mt-3">
                         <label className="block text-sm font-medium">{field.toUpperCase()}
@@ -133,7 +153,7 @@ export function PrejimkaCsvModal({ company, companyKey, rows, filters, onClose, 
                     ))}
                     {sendResults[preview.orderNumber]
                       ? <p role="status" className={`mt-3 text-sm ${sendResults[preview.orderNumber].ok ? 'text-green-700' : 'text-red-700'}`}>{sendResults[preview.orderNumber].message}</p>
-                      : <button type="button" onClick={() => send(preview)} disabled={sending !== null}
+                      : <button type="button" onClick={() => send(preview)} disabled={sending !== null || !destinationsByOrder[preview.orderNumber]}
                         className="mt-3 rounded bg-teal-700 px-4 py-2 text-sm text-white disabled:opacity-50">
                         {sending === preview.orderNumber ? 'Odesílám…' : 'Odeslat zakázku'}
                       </button>}
